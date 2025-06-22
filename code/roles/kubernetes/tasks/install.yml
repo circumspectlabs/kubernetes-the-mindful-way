@@ -1,0 +1,92 @@
+###
+### Native Kubernetes components
+###
+- name: Download Kubernetes binaries
+  ansible.builtin.get_url:
+    url: "{{ item.value }}"
+    dest: "/usr/local/bin/"
+    owner: root
+    group: root
+    mode: '0755'
+    force: "{{ kubernetes_force_upgrade }}"
+  loop_control:
+    label: "{{ item.key }}"
+  with_items: "{{ kubernetes_binary | dict2items }}"
+  retries: 3
+
+- name: Create kubectl completions
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - |-
+        kubectl completion bash > /etc/bash_completion.d/kubectl
+        chmod 644 /etc/bash_completion.d/kubectl
+    creates: /etc/bash_completion.d/kubectl
+
+###
+### Ansible dependencies
+###
+- name: Install ansible dependencies (debain)
+  ansible.builtin.apt:
+    name:
+      - python3-kubernetes
+  when: ansible_os_family|lower == 'debian'
+
+- name: Install ansible dependencies (redhat)
+  ansible.builtin.dnf:
+    name:
+      - python3-kubernetes
+  when: ansible_os_family|lower == 'redhat'
+
+###
+### Helm
+###
+- name: Download helm binaries
+  ansible.builtin.get_url:
+    url: "{{ helm_binary.helm }}"
+    dest: /tmp/helm.tar.gz
+    owner: root
+    group: root
+    mode: '0644'
+    force: "{{ kubernetes_force_upgrade }}"
+  changed_when: false
+  retries: 3
+
+- name: Install helm binaries
+  ansible.builtin.unarchive:
+    src: "/tmp/helm.tar.gz"
+    dest: "/usr/local/bin/"
+    remote_src: yes
+    include:
+      - linux-{{ machine_arch_map[ansible_architecture] }}/helm
+    extra_opts:
+      - --strip-components
+      - 1
+
+- name: Install helm plugins (root)
+  ansible.builtin.command: &x_helm_plugins_command
+    argv:
+      - /bin/bash
+      - -c
+      - |-
+        /usr/local/bin/helm plugin install {{ item.url }}
+    creates: "~/.local/share/helm/plugins/{{ item.folder }}"
+  loop_control:
+    label: "{{ item.name }}"
+  with_items:
+    - name: helm-diff
+      folder: helm-diff.git
+      url: https://github.com/databus23/helm-diff.git
+  become: true
+  become_user: root
+
+- name: Create helm completions
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - |-
+        /usr/local/bin/helm completion bash > /etc/bash_completion.d/helm.bash
+        chmod 644 /etc/bash_completion.d/helm.bash
+    creates: /etc/bash_completion.d/helm.bash

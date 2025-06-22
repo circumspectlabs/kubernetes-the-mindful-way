@@ -1,0 +1,126 @@
+- name: Ensure Kubernetes Proxy directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ proxy_conf_dir }}"
+
+- name: Create Kubernetes Proxy keys
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+    owner: root
+    group: root
+    mode: '0600'
+  loop:
+    - proxy.key        # User: system:kube-proxy
+    - proxy-server.key # Server: proxy-server
+
+- name: Proxy Server
+  block:
+    - name: Create Kubernetes Proxy server certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/proxy-server.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/proxy-server.key"
+        common_name: proxy
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - serverAuth
+        subject_alt_name:
+          - IP:127.0.0.1
+          - DNS:localhost
+          - DNS:proxy-server
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes Proxy server certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/proxy-server.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/proxy-server.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: root
+        group: root
+        mode: '0600'
+      notify:
+        - kubernetes proxy daemon-restart
+
+- name: Proxy Client
+  block:
+    - name: Create Kubernetes Proxy certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/proxy.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/proxy.key"
+        common_name: system:kube-proxy
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes Proxy client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/proxy.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/proxy.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: root
+        group: root
+        mode: '0600'
+      notify:
+        - kubernetes proxy daemon-restart
+
+    - name: Configure Kubernetes Config for "proxy"
+      ansible.builtin.template:
+        src: kubeconfig/system.j2
+        dest: "{{ kubernetes_conf_dir }}/config/proxy"
+        owner: root
+        group: root
+        mode: '0600'
+      vars:
+        server: "{{ (kubernetes_profile != 'worker') | ternary('https://127.0.0.1:6443', 'https://' + vrrp_ip + ':6443') }}"
+        certificate_authority: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        client_certificate: "{{ kubernetes_conf_dir }}/pki/proxy.crt"
+        client_key: "{{ kubernetes_conf_dir }}/pki/proxy.key"
+      notify:
+        - kubernetes proxy daemon-restart
+
+- name: Configure Kubernetes Proxy
+  ansible.builtin.template:
+    src: core/kube-proxy-config.yaml.j2
+    dest: "{{ proxy_conf_dir }}/kube-proxy-config.yaml"
+    owner: root
+    group: root
+    mode: '0600'
+  notify:
+    - kubernetes proxy daemon-restart
+
+- name: Configure Kubernetes Proxy service systemd unit
+  ansible.builtin.template:
+    src: core/kubernetes-proxy.service.j2
+    dest: /etc/systemd/system/kubernetes-proxy.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - daemon-reload
+    - kubernetes proxy daemon-restart
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable Kubernetes Proxy service
+  ansible.builtin.systemd:
+    name: kubernetes-proxy.service
+    enabled: true

@@ -1,0 +1,92 @@
+import { Callout } from 'nextra/components';
+
+# Business Concepts
+
+This article mostly explains business and management side of the most known
+development practices, in the context of Kubernetes systems. This might be useful
+for engineers of all kinds, and for non-technical people who still have to be
+close to development and technical stuff.
+
+## DevOps
+
+**DevOps** is a well-known shorthand of Development and Operations, and it's a set
+of practices. Usually we use is as a specific job title for the software engineers
+who are responsible for that set of practices. The practices include everything
+what can improve the velocity of development teams.
+
+From the business side, it's a way to make the development process more effective,
+speed up and make more reliable delivery to production, simplify requirements to
+the developers (to lower the job description requirements, thus simplify hiring),
+reduce amount of human errors during development, etc. The benefits are usually
+worth only for compliance-, security-, and reliability- heavy projects, or starting
+from middle+ sized development teams.
+
+For the Kubernetes environment, Kubernetes is a useful part of technical stack which
+allows implementing smooth processes of releasing and maintaining software (business
+logic) with respect to SLA (identified in the contracts level of reliability,
+security, etc). Useful features: rolling updates, autoscaling, enhanced resource
+management, automated networking and service discovery, etc.
+
+## Platform Engineering
+
+**Platform Engineering** is a process of maintaining and developing the **Internal
+Development Platform**. 
+
+**Internal Development Platform** is a set of services, scripts, tools, templates, and
+standards for streamlining the process of software development, including the
+development itself, source code management, continuous integration, software delivery,
+software maintenance, development contracts enforcement, etc.
+
+<Callout type="warning">
+**Internal Development Platform** might be shorten to IDP, and IdP is an
+**Identity Provider** (a kind of security services which manages access of someone
+to something - usually a part of an **Internal Development Platform**). Don't mistake
+here, there are IDP and IdP.
+</Callout>
+
+Platform Engineers are usually just software engineers who are responsible for the
+internal software and services (see the definition above). You can segregate a
+specific development team for that set of responsibilities, and then they can
+improve the key metrics of other development teams.
+
+It is not the same as just enforcement of the existing development team. The
+development process strongly relies upon communication between members, thus
+every next +1 member in a team requires the whole team communicate more. From
+some amount of members, it makes every next team enforcement less effective.
+However, if you separate some developers with this specific set of responsibilities
+to another team, there will be no such effect.
+
+From the business side, it's the next level or process efficiency. When your
+business grows, and it becomes affordable, you can enable this practice to make
+the development process even more effective (after DevOps practices).
+
+In almost any internal development platform, Kubernetes plays the core role. It's
+already a corporate standard, de facto and de jure. Useful features: flexible RBAC,
+admission controllers, extensible functionality (with operators), etc.
+
+## DevSecOps
+
+**DevSecOps** is another level of DevOps. Correspondingly, with Development and
+Operations, it includes Security. As same as for DevOps engineers, we name
+some specific software engineers as "DevSecOps" when they are responsible for
+security measures according to the information security policy and compliance
+programs. DevOps and DevSecOps usually work together, because security is complex
+and takes a lot of efforts, and someone still has to take care about reliability
+and development processes automation.
+
+From some point of business growth, you must enable some budget for security and
+risks management. These guys, at least, can decrease these risks to the acceptable
+level. For some specific cases, like a cybersecurity product, it can even improve
+the product attractiveness for customers.
+
+Kubernetes is a very security-friendly technology which allows implementing from
+basic to zero-trust level of security for almost any business case. Useful
+features: flexible container security, network policies, admission controllers
+(e.g. Gatekeeper, Kyverno), secrets managers (usually additinal components), etc.
+
+## Quick Summary
+
+Another and last part of theory is behind. If you are an engineer, now you can
+prove your technical decision/opinion with a straight and clear business
+explanation. For business persons, this topic just reduces the fog around some
+engineering terms and practices.

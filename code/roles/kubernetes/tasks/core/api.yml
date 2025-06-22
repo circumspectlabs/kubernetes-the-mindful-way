@@ -1,0 +1,352 @@
+- name: Create Kubernetes API keys
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+    owner: root
+    group: control-plane
+    mode: '0640'
+  loop:
+    - server.key            # Server: api
+    - client.key            # Group: system:masters
+    - aggregator-client.key # User: aggregator-client
+    - kubelet-client.key    # User: kubelet
+
+- name: API Server
+  block:
+    - name: Create Kubernetes API server certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/server.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/server.key"
+        common_name: api
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - serverAuth
+        subject_alt_name:
+          - IP:127.0.0.1                       # link-local
+          - IP:{{ vlan_ip }}                   # internal
+          - IP:{{ vrrp_ip }}                   # floating IP
+          - IP:{{ kubernetes_api_service_ip }} # in-cluster IP
+          # - IP:{{ public_ip }}                 # public IP
+          - DNS:localhost
+          - DNS:control-plane
+          - DNS:kubernetes
+          - DNS:kubernetes.default
+          - DNS:kubernetes.default.svc
+          - DNS:kubernetes.default.svc.cluster.local
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes API server certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/server.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/server.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: root
+        group: control-plane
+        mode: '0640'
+      notify:
+        - kubernetes api daemon-restart
+
+- name: API Client
+  block:
+    - name: Create Kubernetes API client certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/client.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/client.key"
+        common_name: cluster-admin
+        organization_name: system:masters
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes API client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/client.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/client.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: root
+        group: control-plane
+        mode: '0640'
+      notify:
+        - kubernetes api daemon-restart
+
+    - name: Configure Kubernetes Config for "cluster-admin"
+      ansible.builtin.template:
+        src: kubeconfig/system.j2
+        dest: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+        owner: root
+        group: control-plane
+        mode: '0640'
+      vars:
+        server: "https://127.0.0.1:6443"
+        certificate_authority: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        client_certificate: "{{ kubernetes_conf_dir }}/pki/client.crt"
+        client_key: "{{ kubernetes_conf_dir }}/pki/client.key"
+
+- name: Aggregator Client
+  block:
+    - name: Create Kubernetes Aggregator client certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/aggregator-client.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/aggregator-client.key"
+        common_name: aggregator-client
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes Aggregator client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/aggregator-client.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/aggregator-client.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/aggregator-ca.crt"
+        ownca_privatekey_content: "{{ aggregator_ca_key }}"
+        provider: ownca
+        owner: root
+        group: control-plane
+        mode: '0640'
+      notify:
+        - kubernetes api daemon-restart
+
+- name: Kubelet Client
+  block:
+    - name: Create Kubernetes Kubelet client certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet-client.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/kubelet-client.key"
+        common_name: system:node:control-plane
+        organization_name: system:masters
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes Kubelet client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet-client.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/kubelet-client.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.crt"
+        ownca_privatekey_content: "{{ kubelet_ca_key }}"
+        provider: ownca
+        owner: root
+        group: control-plane
+        mode: '0640'
+      notify:
+        - kubernetes api daemon-restart
+
+- name: Service Account Tokens
+  block:
+    - name: Create Kubernetes API service accounts public key
+      community.crypto.openssl_publickey:
+        path: "{{ kubernetes_conf_dir }}/pki/service-account.pub"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/service-account.key"
+        owner: root
+        group: control-plane
+        mode: '0640'
+      notify:
+        - kubernetes api daemon-restart
+
+###
+### Etcd client keys
+###
+### Sure, we can use the existing client keys directly from
+### /etc/etcd/pki, but it requires setting the tricky file
+### permissions. Instead, it's better to make a copy of these
+### files and allow them for "control-plane" group.
+### This trick allows avoiding complex file permissions and
+### remains access to etcd secure.
+###
+- name: Grant access for Kubernetes API to Etcd
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0600') }}"
+  loop_control:
+    label: "{{ item.name }}"
+  loop:
+    - name: "ca.crt"
+      src: "{{ etcd_conf_dir }}/pki/ca.crt"
+      dest: "{{ kubernetes_conf_dir }}/pki/etcd-ca.crt"
+      group: "control-plane"
+      mode: '0640'
+    - name: "client.crt"
+      src: "{{ etcd_conf_dir }}/pki/client.crt"
+      dest: "{{ kubernetes_conf_dir }}/pki/etcd-client.crt"
+      group: "control-plane"
+      mode: '0640'
+    - name: "client.key"
+      src: "{{ etcd_conf_dir }}/pki/client.key"
+      dest: "{{ kubernetes_conf_dir }}/pki/etcd-client.key"
+      group: "control-plane"
+      mode: '0640'
+
+###
+### Audit log
+###
+- name: Configure audit policy for Kubernetes
+  ansible.builtin.template:
+    src: audit-policy.yaml.j2
+    dest: "{{ kubernetes_conf_dir }}/audit-policy.yaml"
+    owner: root
+    group: control-plane
+    mode: '0640'
+  notify:
+    - kubernetes api daemon-restart
+  when: kubernetes_audit_log_enabled
+
+###
+### OIDC Auth (JWT auth from external provider)
+###
+- name: Load OIDC Auth variables
+  ansible.builtin.include_vars: oidc-auth.yaml
+  when: kubernetes_oidc_auth_enabled
+
+- name: Configure authentication policy for Kubernetes
+  ansible.builtin.template:
+    src: auth-policy.yaml.j2
+    dest: "{{ kubernetes_conf_dir }}/auth-policy.yaml"
+    owner: root
+    group: control-plane
+    mode: '0640'
+  notify:
+    - kubernetes api daemon-restart
+  when: kubernetes_oidc_auth_enabled
+
+###
+### Kubernetes API component has empty set of resources until the
+### proper load of the controller manager component. However,
+### controller manager requires some pre-created components for
+### initialization, including RBAC objects.
+### For initial configuration of RBAC, we have to load API component
+### without RBAC, then create the corresponding objects, then restart
+### it with RBAC.
+### This implementation (below) allows to configure it even one and
+### forewer. However, even in case you deleted ".stage" file, it will
+### not expose your API unsafely.
+###
+- name: Set Kubernetes API deploy stage to "initialize"
+  ansible.builtin.command:
+    argv: ["bash", "-c", "echo -n initialize > {{ kubernetes_conf_dir }}/.stage"]
+    creates: "{{ kubernetes_conf_dir }}/.stage"
+
+- &x_get_deploy_stage
+  block:
+    - name: Get Kubernetes API deploy stage (1/2)
+      ansible.builtin.slurp:
+        src: "{{ kubernetes_conf_dir }}/.stage"
+      register: get_stage_command
+    - name: Get Kubernetes API deploy stage (2/2)
+      ansible.builtin.set_fact:
+        kubernetes_deploy_stage: "{{ get_stage_command.content | b64decode }}"
+
+- name: Configure Kubernetes API server systemd unit (no RBAC)
+  ansible.builtin.template:
+    src: core/kubernetes-api.service.j2
+    dest: /etc/systemd/system/kubernetes-api.service
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    api_server_rbac_enabled: false
+    api_server_bind_address: 127.0.0.1
+  notify:
+    - daemon-reload
+    - kubernetes api daemon-restart
+  when: &x_when_init kubernetes_deploy_stage == 'initialize'
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Initialize namespaces
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.file', item) | from_yaml_all }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  loop:
+    - init.yaml
+  when: *x_when_init
+  retries: 3
+  delay: 5
+  timeout: 5
+  run_once: true
+
+- name: Configure RBAC
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.file', item) | from_yaml_all }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  loop:
+    - rbac.sa.yaml
+    - rbac.cr.yaml
+    - rbac.crb.yaml
+    - rbac.r.yaml
+    - rbac.rb.yaml
+  when: *x_when_init
+  retries: 3
+  delay: 5
+  timeout: 5
+  run_once: true
+
+- name: Set Kubernetes API deploy stage to "configured"
+  ansible.builtin.command:
+    argv: ["bash", "-c", "echo -n configured > {{ kubernetes_conf_dir }}/.stage"]
+  when: *x_when_init
+
+- *x_get_deploy_stage
+
+- name: Configure Kubernetes API service systemd unit (with RBAC)
+  ansible.builtin.template:
+    src: core/kubernetes-api.service.j2
+    dest: /etc/systemd/system/kubernetes-api.service
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    api_server_rbac_enabled: true
+  notify:
+    - daemon-reload
+    - kubernetes api daemon-restart
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable Kubernetes API service
+  ansible.builtin.systemd:
+    name: kubernetes-api.service
+    state: started
+    enabled: true
+
+- name: Configure RBAC OIDC
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'oidc-permissions.yaml.j2') | from_yaml_all }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  when: kubernetes_oidc_auth_enabled
+  retries: 3
+  delay: 5
+  timeout: 5
+  run_once: true

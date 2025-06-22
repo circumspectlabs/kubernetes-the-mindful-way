@@ -1,0 +1,195 @@
+- name: Ensure Kubelet directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop:
+    - "{{ kubelet_conf_dir }}"
+
+- name: Create Kubelet keys
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+    owner: root
+    group: root
+    mode: '0600'
+  loop:
+    - kubelet.key        # User: system:node:NODENAME
+    - kubelet-server.key # Server: kubelet
+
+- name: Kubelet Server
+  block:
+    - name: Create Kubelet server certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet-server.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/kubelet-server.key"
+        common_name: api
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - serverAuth
+        subject_alt_name:
+          - IP:127.0.0.1
+          - IP:{{ vlan_ip }}
+          - DNS:localhost
+          - DNS:kubelet
+          - DNS:{{ inventory_hostname }}
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubelet server certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet-server.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/kubelet-server.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.crt"
+        ownca_privatekey_content: "{{ kubelet_ca_key }}"
+        provider: ownca
+        owner: root
+        group: root
+        mode: '0600'
+      notify:
+        - kubernetes kubelet daemon-restart
+
+- name: API Kubelet Client
+  block:
+    - name: Create Kubernetes API kubelet client certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/kubelet.key"
+        common_name: system:node:{{ inventory_hostname }}
+        organization_name: system:nodes
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes API kubelet client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/kubelet.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: root
+        group: root
+        mode: '0600'
+      notify:
+        - kubernetes kubelet daemon-restart
+
+    - name: Configure Kubernetes Config for "kubelet"
+      ansible.builtin.template:
+        src: kubeconfig/system.j2
+        dest: "{{ kubernetes_conf_dir }}/config/kubelet"
+        owner: root
+        group: root
+        mode: '0600'
+      vars:
+        server: "{{ (kubernetes_profile != 'worker') | ternary('https://127.0.0.1:6443', 'https://' + vrrp_ip + ':6443') }}"
+        certificate_authority: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        client_certificate: "{{ kubernetes_conf_dir }}/pki/kubelet.crt"
+        client_key: "{{ kubernetes_conf_dir }}/pki/kubelet.key"
+
+###
+### Kubelet should know how to configure the pods with "ClusterFirstWithHostNet"
+### DNS policy (.spec.dnsPolicy of Pod manifest). Thus, we must provide the
+### appropriate resolv.conf. The point is that OS may have (or not) the
+### systemd-resolved daemon, and that case they have "nameserver 127.0.0.1"
+### in /etc/resolv.conf. It's necessary to parse the corresponding file
+### to identify the really working one.
+###
+- name: Find preferrable resolv.conf file in the system
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - |-
+        function check_for_localhost {
+          _FOUND_LOCALHOST=false
+          for i in $(grep -Eo '^nameserver [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' $1 | cut -d ' ' -f 2 | cut -d '.' -f 1); do
+            if [[ "${i}" == "127" ]]; then
+              _FOUND_LOCALHOST=true
+            fi
+          done
+          echo "${_FOUND_LOCALHOST}"
+        }
+
+        _PICKED=null
+        for i in "/etc/resolv.conf" "/run/systemd/resolve/resolv.conf"; do
+          if [[ "$(check_for_localhost ${i})" == "false" ]]; then
+            _PICKED=$i
+            break
+          fi
+        done
+
+        if [[ "" == "null" ]]; then
+          echo 'There is no appropriate "resolv.conf". Please configure /etc/resolv.conf without nameservers to 127.0.0.1/8' 1>&2
+          exit 1
+        fi
+
+        echo $_PICKED
+  register: resolv_conf_path_command
+  changed_when: false
+  check_mode: false
+
+###
+### It's very useful to know the instance CPU and memory configuration
+### even for onpremise environments.
+###
+- name: Detect instance type (size)
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - |-
+        echo $(nproc)c$(free -h | grep -oP '\d+' | head -1)g
+  register: instance_type_command
+  changed_when: false
+  check_mode: false
+
+- name: Set temporary facts
+  ansible.builtin.set_fact:
+    resolv_conf_path: "{{ resolv_conf_path_command.stdout_lines[0] }}"
+    instance_type: "{{ instance_type_command.stdout_lines[0] }}"
+
+- name: Set configuration facts
+  ansible.builtin.set_fact:
+    node_labels: "{{ {'node.kubernetes.io/instance-role': kubernetes_profile, 'node.kubernetes.io/instance-type': instance_type} | ansible.builtin.combine(labels) }}"
+
+- name: Configure Kubelet
+  ansible.builtin.template:
+    src: core/kubelet-config.yaml.j2
+    dest: "{{ kubelet_conf_dir }}/kubelet-config.yaml"
+    owner: root
+    group: root
+    mode: '0600'
+  notify:
+    - kubernetes kubelet daemon-restart
+
+- name: Configure Kubelet service unit
+  ansible.builtin.template:
+    src: core/kubelet.service.j2
+    dest: "/etc/systemd/system/kubelet.service"
+    owner: root
+    group: root
+    mode: '0600'
+  notify:
+    - daemon-reload
+    - kubernetes kubelet daemon-restart
+  vars:
+    jq: "join('=', [to_string(key), to_string(value)])"
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable Kubelet service
+  ansible.builtin.systemd:
+    name: kubelet.service
+    enabled: true

@@ -1,0 +1,93 @@
+- name: Create "containerd" group
+  ansible.builtin.group:
+    name: containerd
+    gid: "{{ containerd_gid }}"
+
+- name: Ensure containerd directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - path: "{{ containerd_conf_dir }}"
+    - path: "{{ containerd_data_dir }}"
+      mode: '0711'
+    - path: "{{ containerd_state_dir }}"
+      mode: '0711'
+
+- name: Download runc binary
+  ansible.builtin.get_url:
+    url: "https://github.com/opencontainers/runc/releases/download/v{{ runc_version }}/runc.{{ machine_arch_map[ansible_architecture] }}"
+    dest: /usr/bin/runc
+    owner: root
+    group: root
+    mode: '0755'
+    force: "{{ runc_force_upgrade }}"
+  retries: 3
+
+- name: Download containerd binaries
+  ansible.builtin.get_url:
+    url: "https://github.com/containerd/containerd/releases/download/v{{ containerd_version }}/containerd-{{ containerd_version }}-linux-{{ machine_arch_map[ansible_architecture] }}.tar.gz"
+    dest: /tmp/containerd.tar.gz
+    owner: root
+    group: root
+    mode: '0644'
+    force: "{{ containerd_force_upgrade }}"
+  changed_when: false
+  retries: 3
+
+- name: Install containerd binaries
+  ansible.builtin.unarchive:
+    src: "/tmp/containerd.tar.gz"
+    dest: "/usr/local/bin/"
+    owner: root
+    group: root
+    mode: '0755'
+    remote_src: yes
+    extra_opts:
+      - --strip-components
+      - 1
+  notify:
+    - containerd daemon-restart
+
+- ansible.builtin.include_tasks: nvidia.yml
+  when: containerd_nvidia_runtime
+
+- ansible.builtin.set_fact:
+    binary_runc: /usr/bin/runc
+
+- name: Enable containerd config
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: "{{ containerd_conf_dir }}/config.toml"
+    mode: '0600'
+  notify:
+    - containerd daemon-restart
+
+- name: Configure containerd systemd unit
+  ansible.builtin.template:
+    src: containerd.service.j2
+    dest: /etc/systemd/system/containerd.service
+    mode: '0644'
+  notify:
+    - daemon-reload
+    - containerd daemon-restart
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable containerd service
+  ansible.builtin.systemd_service:
+    name: containerd.service
+    state: started
+    enabled: true
+  timeout: 15
+
+- name: Enable completions for "ctr"
+  ansible.builtin.copy:
+    src: "ctr_completions"
+    dest: "/etc/bash_completion.d/ctr"
+    owner: root
+    group: root
+    mode: '0755'

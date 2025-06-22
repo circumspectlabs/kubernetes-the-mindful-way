@@ -1,0 +1,145 @@
+###
+### Global
+###
+kubernetes_profile: "unspecified" # must be "control-plane", "control-plane-noworker", or "worker"
+kubernetes_control_plane_group_name: control-plane
+
+kubernetes_version: "1.31.3"
+kubernetes_helm_version: "3.16.4"
+kubernetes_conf_dir: /etc/kubernetes
+kubernetes_sock_dir: /var/run/kubernetes
+kubernetes_log_dir: /var/log/kubernetes
+kubernetes_cluster_name: kubernetes
+kubernetes_bind_address: "0.0.0.0"
+kubernetes_debug_address: "0.0.0.0"
+kubernetes_force_upgrade: false
+
+###
+### Non-public IPv4 range (for CGNAT)
+###
+kubernetes_service_ip_range: 100.64.0.0/12 # ~1M addresses
+kubernetes_cluster_ip_range: 100.80.0.0/12 # ~1M addresses
+
+kubernetes_api_service_ip: "{{ kubernetes_service_ip_range | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address') }}"
+kubernetes_dns_service_ip: "{{ kubernetes_service_ip_range | ansible.utils.ipaddr('10') | ansible.utils.ipaddr('address') }}"
+
+###
+### Users and groups
+###
+control_plane_gid: 65313
+control_plane_uid: 65313
+kubelet_gid: 65314
+kubelet_uid: 65314
+
+###
+### CNI
+###
+kubernetes_cni_vendor: calico
+
+###
+### CSI
+###
+# kubernetes_storage_path: /data/kubernetes
+
+###
+### Audit log
+###
+kubernetes_audit_log_enabled: true
+kubernetes_audit_log_file: "{{ kubernetes_log_dir }}/audit.log"
+kubernetes_audit_log_maxbackup: 14
+
+###
+### OIDC Auth
+###
+kubernetes_oidc_auth_enabled: false # TODO
+
+###
+### Node labels
+###
+labels: {}
+#   my-label-name: my-label-value
+#   my.label.example.tld/something: "true"
+
+###
+### Node taints
+###
+taints: []
+#   - key: node-role.kubernetes.io/control-plane
+#     effect: NoSchedule
+
+###
+### Binaries
+###
+kubernetes_binary:
+  api: https://dl.k8s.io/v{{ kubernetes_version }}/bin/linux/{{ machine_arch_map[ansible_architecture] }}/kube-apiserver
+  controller: https://dl.k8s.io/v{{ kubernetes_version }}/bin/linux/{{ machine_arch_map[ansible_architecture] }}/kube-controller-manager
+  scheduler: https://dl.k8s.io/v{{ kubernetes_version }}/bin/linux/{{ machine_arch_map[ansible_architecture] }}/kube-scheduler
+  kubectl: https://dl.k8s.io/v{{ kubernetes_version }}/bin/linux/{{ machine_arch_map[ansible_architecture] }}/kubectl
+  kubelet: https://dl.k8s.io/v{{ kubernetes_version }}/bin/linux/{{ machine_arch_map[ansible_architecture] }}/kubelet
+  proxy: https://dl.k8s.io/v{{ kubernetes_version }}/bin/linux/{{ machine_arch_map[ansible_architecture] }}/kube-proxy
+helm_binary:
+  helm: https://get.helm.sh/helm-v{{ kubernetes_helm_version }}-linux-{{ machine_arch_map[ansible_architecture] }}.tar.gz
+
+###
+### Etcd
+###
+etcd_conf_dir: /etc/etcd
+
+###
+### API Server
+###
+api_server_bind_address: "{{ kubernetes_bind_address }}"
+
+###
+### Controller Manager
+###
+controller_manager_bind_address: "{{ kubernetes_debug_address }}"
+
+###
+### Scheduler
+###
+scheduler_bind_address: "{{ kubernetes_debug_address }}"
+
+###
+### Kubectl
+###
+# nothing
+
+###
+### Kubelet
+###
+kubelet_conf_dir: /var/lib/kubelet
+kubelet_bind_address: "{{ vlan_ip }}"
+kubelet_cri_socket: /run/containerd/containerd.sock
+kubelet_max_pods: 110
+kubelet_verbosity: 4
+
+###
+### Proxy
+###
+proxy_conf_dir: /var/lib/kube-proxy
+proxy_bind_address: "{{ kubernetes_debug_address }}"
+
+###
+### Calico
+###
+calico_version: "3.30.1"
+calico_mock_bpffs: true
+
+###
+### Coredns
+###
+coredns_version: "1.12.0"
+
+###
+### Metrics API
+###
+metrics_version: "0.7.2"
+metric_resolution: 15s
+
+# usage: {{ machine_arch_map[ansible_architecture] }}
+machine_arch_map:
+  aarch64: arm64
+  arm64: arm64
+  x86_64: amd64
+  amd64: amd64

@@ -1,0 +1,24 @@
+# original source: https://github.com/containerd/containerd/blob/v1.7.26/containerd.service
+
+[Unit]
+Description=containerd container runtime
+Documentation=https://containerd.io
+After=network.target local-fs.target
+
+[Service]
+ExecStartPre=-/sbin/modprobe overlay
+ExecStart=/usr/local/bin/containerd --config {{ containerd_conf_dir }}/config.toml
+
+Type=notify
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNPROC=infinity
+LimitCORE=infinity
+LimitNOFILE=infinity
+TasksMax=infinity
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target

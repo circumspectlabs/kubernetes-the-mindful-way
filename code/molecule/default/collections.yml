@@ -1,0 +1,6 @@
+collections:
+  - ansible.posix
+  - community.general
+  - community.crypto
+  - community.libvirt
+  - kubernetes.core

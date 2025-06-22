@@ -1,0 +1,66 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+staticPodPath: /etc/kubernetes/manifests
+address: {{ kubelet_bind_address }}
+port: 10250
+tlsCertFile: "{{ kubernetes_conf_dir }}/pki/kubelet-server.crt"
+tlsPrivateKeyFile: "{{ kubernetes_conf_dir }}/pki/kubelet-server.key"
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    cacheTTL: 0s
+    enabled: true
+  x509:
+    clientCAFile: {{ kubernetes_conf_dir }}/pki/kubelet-ca.crt
+authorization:
+  mode: Webhook
+  webhook:
+    cacheAuthorizedTTL: 0s
+    cacheUnauthorizedTTL: 0s
+oomScoreAdj: -900
+cgroupDriver: systemd
+cgroupsPerQOS: false
+enforceNodeAllocatable: []
+clusterDNS:
+- {{ kubernetes_dns_service_ip }}
+clusterDomain: cluster.local
+containerRuntimeEndpoint: "unix://{{ kubelet_cri_socket }}"
+cpuManagerReconcilePeriod: 0s
+evictionPressureTransitionPeriod: 0s
+fileCheckFrequency: 0s
+healthzBindAddress: 127.0.0.1
+healthzPort: 10248
+httpCheckFrequency: 0s
+imageMinimumGCAge: 0s
+logging:
+  flushFrequency: 0
+  options:
+    json:
+      infoBufferSize: "0"
+  verbosity: {{ kubelet_verbosity }}
+maxPods: {{ kubelet_max_pods }}
+memorySwap: {}
+nodeStatusReportFrequency: 0s
+nodeStatusUpdateFrequency: 0s
+resolvConf: {{ resolv_conf_path }}
+rotateCertificates: false
+runtimeRequestTimeout: 0s
+shutdownGracePeriod: 0s
+shutdownGracePeriodCriticalPods: 0s
+streamingConnectionIdleTimeout: 0s
+syncFrequency: 0s
+volumeStatsAggPeriod: 0s
+featureGates:
+  DisableCloudProviders: true
+systemReserved:
+  cpu: 300m
+  memory: 500Mi
+kubeReserved:
+  cpu: 200m
+  memory: 300Mi
+registerNode: true
+{% if taints %}
+registerWithTaints:
+  {{ taints | to_nice_yaml(indent=2) | indent(2) }}
+{% endif %}

@@ -1,0 +1,20 @@
+###
+### This playbook enables the Kubernetes control plane with everything
+### necessary to just start running the Kubernetes clusters. It only
+### configures control planes (tainted control plane nodes), in highly-
+### available mode (depending on the count of nodes in "control-plane"
+### group).
+###
+---
+- hosts: control-plane
+  become: true
+  roles:
+    - role: etcd
+    - role: containerd
+    - role: kubernetes
+      vars:
+        kubernetes_profile: control-plane
+        taints:
+          - key: node-role.kubernetes.io/control-plane
+            effect: NoSchedule
+    - role: keepalived

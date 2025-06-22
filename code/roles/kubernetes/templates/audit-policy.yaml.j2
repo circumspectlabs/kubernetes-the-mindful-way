@@ -1,0 +1,296 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  ###
+  ### Skips for api, controller, and scheduler
+  ###
+  - level: None
+    users: ["system:apiserver"]
+    verbs: ["get", "watch", "update"]
+    resources:
+      - group: "coordination.k8s.io"
+        resources:
+          - leases
+        resourceNames:
+          - apiserver-*
+    namespaces:
+      - kube-system
+  - level: None
+    users: ["system:apiserver"]
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources:
+          - clusterroles
+          - clusterrolebindings
+          - roles
+          - rolebindings
+      - group: "admissionregistration.k8s.io"
+        resources:
+          - mutatingwebhookconfigurations
+          - validatingadmissionpolicies
+          - validatingadmissionpolicybindings
+          - validatingwebhookconfigurations
+      - group: "apiextensions.k8s.io"
+        resources:
+          - customresourcedefinitions
+      - group: "apiregistration.k8s.io"
+        resources:
+          - apiservices
+      - group: "coordination.k8s.io"
+        resources:
+          - leases
+      - group: "discovery.k8s.io"
+        resources:
+          - endpointslices
+      - group: "flowcontrol.apiserver.k8s.io"
+        resources:
+          - flowschemas
+          - prioritylevelconfigurations
+      - group: "networking.k8s.io"
+        resources:
+          - ingressclasses
+      - group: "node.k8s.io"
+        resources:
+          - runtimeclasses
+      - group: "scheduling.k8s.io"
+        resources:
+          - priorityclasses
+      - group: "storage.k8s.io"
+        resources:
+          - storageclasses
+          - volumeattachments
+      - group: "" # literally all common objects
+  - level: None
+    users: ["system:kube-controller-manager"]
+    verbs: ["get", "watch", "update"]
+    resources:
+      - group: "coordination.k8s.io"
+        resources:
+          - leases
+        resourceNames:
+          - kube-controller-manager
+    namespaces:
+      - kube-system
+  - level: None
+    users: ["system:kube-scheduler"]
+    verbs: ["get", "watch", "update"]
+    resources:
+      - group: "coordination.k8s.io"
+        resources:
+          - leases
+        resourceNames:
+          - kube-scheduler
+    namespaces:
+      - kube-system
+  - level: None
+    users: ["system:kube-scheduler"]
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: "apps"
+        resources:
+          - replicasets
+          - statefulsets
+      - group: "policy"
+        resources:
+          - poddisruptionbudgets
+      - group: "storage.k8s.io"
+        resources:
+          - csidrivers
+          - csinodes
+          - csistoragecapacities
+          - storageclasses
+      - group: ""
+        resources:
+          - configmaps
+          - namespaces
+          - nodes
+          - persistentvolumeclaims
+          - persistentvolumes
+          - pods
+          - replicationcontrollers
+          - services
+  ###
+  ### Skips for kubelet and kube-proxy
+  ###
+  - level: None
+    users: ["system:node:*"]
+    verbs: ["get", "watch", "update"]
+    resources:
+      - group: "coordination.k8s.io"
+        resources:
+          - leases
+    namespaces:
+      - kube-node-lease
+  - level: None
+    users: ["system:node:*"]
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: "apps"
+        resources:
+          - replicasets
+          - statefulsets
+      - group: "node.k8s.io"
+        resources:
+          - runtimeclasses
+      - group: "storage.k8s.io"
+        resources:
+          - csidrivers
+          - csinodes
+          - csistoragecapacities
+      - group: ""
+        resources:
+          - namespaces
+          - nodes
+          - persistentvolumeclaims
+          - persistentvolumes
+          - pods
+          - services
+          - serviceaccounts
+  - level: None
+    users: ["system:node:*"]
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: ""
+        resources:
+          - configmaps
+        resourceNames:
+          - kube-root-ca.crt
+    namespaces:
+      - kube-system
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: "discovery.k8s.io"
+        resources:
+          - endpointslices
+      - group: ""
+        resources:
+          - endpoints
+          - services
+          - nodes
+  ###
+  ### Log events deletion and override, but don't log creation and view
+  ###
+  - level: None
+    users:
+      - "system:apiserver"
+      - "system:kube-controller-manager"
+      - "system:kube-scheduler"
+      - "system:node:*"
+      - "system:kube-proxy"
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+    resources:
+      - group: ""
+        resources:
+          - events
+  ###
+  ### Don't logs permission checks
+  ###
+  - level: None
+    users:
+      - "system:apiserver"
+      - "system:kube-controller-manager"
+      - "system:kube-scheduler"
+      - "system:node:*"
+      - "system:kube-proxy"
+      - "system:serviceaccount:kube-system:metrics-server"
+      - "system:serviceaccount:kube-system:coredns"
+    resources:
+      - group: "authorization.k8s.io"
+        resources:
+          - localsubjectaccessreviews
+          - selfsubjectaccessreview
+          - selfsubjectrulesreview
+          - subjectaccessreviews
+  ###
+  ### Unflooding from other common components
+  ###
+  - level: None
+    users:
+      - system:serviceaccount:kube-system:metrics-server
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: ""
+        resources:
+          - configmaps
+          - nodes
+          - pods
+  - level: None
+    users:
+      - system:serviceaccount:kube-system:coredns
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: "discovery.k8s.io"
+        resources:
+          - endpointslices
+      - group: ""
+        resources:
+          - namespaces
+          - services
+  ###
+  ### Unflooding from common CNI requests (calico)
+  ###
+  - level: None
+    users:
+      - system:serviceaccount:kube-system:calico-node
+      - system:serviceaccount:kube-system:calico-kube-controllers
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: "crd.projectcalico.org" # literally all objects
+      - group: "policy.networking.k8s.io"
+        resources:
+          - adminnetworkpolicies
+      - group: ""
+        resources:
+          - namespaces
+          - nodes
+          - pods
+          - serviceaccounts
+          - services
+  - level: None
+    users:
+      - system:serviceaccount:kube-system:calico-kube-controllers
+    verbs: ["create"]
+    resources:
+      - group: "crd.projectcalico.org"
+        resources:
+          - tiers
+        resourceNames:
+          - adminnetworkpolicy
+          - default
+  ###
+  ### Skip the most common informative endpoints
+  ###
+  - level: None
+    userGroups: ["system:authenticated"]
+    nonResourceURLs:
+      - "/api"
+      - "/apis"
+      - "/version"
+      - "/healthz"
+  ###
+  ### Record what's else happening in the essential namespaces, with
+  ### request body
+  ###
+  - level: Request
+    resources: []
+    namespaces:
+      - "" # means no namespace
+      - kube-system
+      - kube-public
+      - kube-node-lease
+  ###
+  ### Record metadata of what's else happening in other namespaces
+  ###
+  - level: Metadata
+    omitStages:
+      - "RequestReceived"
+      - "ResponseStarted"

@@ -1,0 +1,40 @@
+log-level: trace
+log-format: text
+pid-file: "{{ molecule_network_directory }}/gvswitch.pid"
+listen: "unix://{{ molecule_network_directory }}/gvswitch.sock"
+stack:
+  mtu: 1500
+  subnet: {{ molecule_network_cidr }}
+  gateway:
+    ip: {{ (molecule_network_cidr | ansible.utils.ipaddr(1)) | ansible.utils.ipaddr("address") }}
+    mac: {{ (molecule_mac | split(":") | batch(3)).0 | join(":") }}:{{ ("gateway" | md5 | batch(2) | map("join") | batch(3)).1 | join(":") }}
+  hypervisor:
+    ip: {{ (molecule_network_cidr | ansible.utils.ipaddr(-1)) | ansible.utils.ipaddr("address") }}
+    mac: {{ (molecule_mac | split(":") | batch(3)).0 | join(":") }}:{{ ("hypervisor" | md5 | batch(2) | map("join") | batch(3)).1 | join(":") }}
+  dns:
+    - name: {{ molecule_dns_suffix | regex_replace('\\.$', '') }}.
+      records:
+        - name: gateway
+          ip: {{ (molecule_network_cidr | ansible.utils.ipaddr(1)) | ansible.utils.ipaddr("address") }}
+{% for item in molecule_yml.platforms %}
+        - name: {{ item.name }}
+          ip: {{ (item.ip | default(molecule_network_cidr | ansible.utils.ipaddr(100 + loop.index))) | ansible.utils.ipaddr('address') }}
+{% endfor %}
+  forwards:
+{% for item in molecule_yml.platforms %}
+    - from:
+        proto: tcp
+        ip: 127.0.0.1
+        port: {{ 59000 + ((((molecule_ephemeral_directory + item.name) | md5 | batch(8)).0 | join | int(base=16)) % 1000) }}
+      to:
+        proto: tcp
+        ip: {{ (item.ip | default(molecule_network_cidr | ansible.utils.ipaddr(100 + loop.index))) | ansible.utils.ipaddr('address') }}
+        port: 22
+{% endfor %}
+  dhcpStaticLeases:
+{% for item in molecule_yml.platforms %}
+    - ip: {{ (item.ip | default(molecule_network_cidr | ansible.utils.ipaddr(100 + loop.index))) | ansible.utils.ipaddr('address') }}
+      mac: "80:e2:12:{{ (item.name | md5 | batch(2) | map('join') | batch(3)).1 | join(':') }}"
+{% endfor %}
+serve:
+  qemu: tcp://{{ gvswitch_qemu_listen.address }}:{{ gvswitch_qemu_listen.port }}

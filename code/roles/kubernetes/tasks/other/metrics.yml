@@ -1,0 +1,6 @@
+- name: Enable Metrics API service
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'other/metrics.manifests.j2') | from_yaml_all }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  run_once: true

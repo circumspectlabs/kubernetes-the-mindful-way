@@ -1,0 +1,19 @@
+keepalived_conf_dir: /etc/keepalived
+keepalived_vrrp_instance: VRRP1
+keepalived_router_id: 101
+
+keepalived_interface: "detect" # examples: "eth0", "enp3s0", "tap0", etc
+keepalived_network_cidr: "detect" # examples: "192.168.10.0/24", "10.10.10.192/26", etc
+
+###
+### This is a special measure to enable unicast
+### communication between VRRP members. Unfortunatelly,
+### gvproxy (this molecule environment) doesn't support
+### multicast.
+###
+keepalived_multicast_available: false
+
+###
+### Role-external
+###
+kubernetes_conf_dir: /etc/kubernetes

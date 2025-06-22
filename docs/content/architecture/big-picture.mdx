@@ -1,0 +1,132 @@
+import { Callout } from 'nextra/components';
+import Image from 'next/image';
+
+# Big Picture
+
+The article reveals the exact architecture of the Kubernetes systems, with
+attention to context-specific details for cloud-managed, self-hosted, reliable,
+and secure cluster implementations. It's a must-read for everyone involved to
+cluster administration, maintenance, development, and usage. In other words,
+this topic represents the answer to the question "What it consists of?".
+
+## Component Diagram
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/big_picture.png" alt="Kubernetes architecture big picture representation" width={500} height={500} />
+</div>
+
+Every Kubernetes cluster consists at least of the following logical groups of
+components:
+
+* **Control plane** (previously known as "master"). This group of components is
+a crucial part of the cluster and responsible for the management of resources in
+the cluster. In other words, it implements the exact "Smart Objects Storage"
+pattern. See details in the [Control Plane](/en/grand-design/control-plane)
+article.
+
+* **Node** (previously known as "worker"). This group of components is
+responsible for running workloads in the way configured by resources in the
+cluster. See details in the [Node](/en/grand-design/node) article.
+
+* **Etcd**. This is the only dependency of a Kubernetes cluster. Most of all cases
+this deployment physically located on the same nodes as the control plane. However,
+it's not necessary to put all eggs in one bucket, it's even prefereable to exclude
+it from control plane and use it as an external dependency.
+
+Here is the most important detail: control plane is ONLY for the management of
+the resources, and nodes are only for running workloads. Physically, it's possible
+(and very common for self-hosted clusters) to run control plane and node software
+components on the same compute instance. It is not recommended practice, but very
+popular because of the native Kubernetes documentation (which relies upon
+`kubeadm` with that deploy scenario by default).
+
+### Etcd
+
+This is a kind of database for the control plane components. However, only one
+component directly communicates with this component, it's very vulnerable
+component of the entire system. It holds Kubernetes secrets which are
+unencrypted by default (anti-practice!). In case of direct write access, you
+can issue a new super-permissive service account token and take control of the
+whole system, most likely without any evidence except audit logs which are also
+disabled by default (anti-practice!).
+
+There also some useful facts about etcd relatively to Kubernetes:
+* You don't have to run etcd WITHIN the cluster, and even don't have to run it
+on the same nodes. It might be a separated service in another physical location
+(even managed by another team).
+* It's possible to run MULTIPLE Kubernetes clusters on the same etcd cluster.
+Surely, it makes this etcd deployment more complex if you still want to ensure
+the security and performance of this etcd cluster. See `--etcd-prefix` flag of
+[kubeapi](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
+component.
+* It's possible to run different kinds of applications on the same etcd cluster
+(i.e. Kubernetes and Patroni). Of course, not recommended die to different load
+patterns (may cause performance issues in future). See `--etcd-prefix` flag of
+[kubeapi](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
+component.
+* Etcd clusters support mTLS auth with RBAC, which is useful for etcd clusters
+shared across different applications and multiple clusters. See [Etcd Authentication](https://etcd.io/docs/v3.3/op-guide/authentication/)
+topic for details.
+* You can arbitrary encrypt the content with `--encryption-provider-config` flag
+of [kubeapi](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
+component. See details about this feature in [Encrypt Data](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
+topic.
+* All components of control plane are usually store the whole state in etcd,
+and it's usually the only reason to run an odd number of control plane nodes.
+For the cases when etcd is separated from control plane components, you highly
+likely don't need to run an odd number of control plane nodes. However, it
+depends on the exact implementation of the control plane.
+
+## Functional Diagram
+
+Another slice of Kubernetes cluster is the functional diagram. This slice
+represents another group of components which usually run on top of the existing
+Kubernetes nodes.
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/big_picture_functional.png" alt="Kubernetes architecture functional diagram" width={500} height={500} />
+</div>
+
+The functional parts of any Kubernetes clusters:
+
+* **Controller Layer**. This layer consists of all state machines and all
+functionality related to handling objects. This layer includes controller-
+manager, scheduler, metrics server, discovery services, part of kubelet,
+kubernetes proxy, external operators, and external admission controllers.
+
+* **Network Layer**. This layer is known as CNI (Container Network Interface)
+and responsible for networking between containers, including firewalling
+and cross-node encryption.
+
+* **Storage Layer**. This layer is known as CSI (Container Storage Interface)
+and responsible for persistent storages. Depending on the use case, you need a
+simple or a very complex implementation of this layer. It's usual to have more
+than one type of CSI, like for [Ceph](https://github.com/ceph/ceph-csi) and
+[Cinder](https://github.com/kubernetes/cloud-provider-openstack/blob/master/docs/cinder-csi-plugin/using-cinder-csi-plugin.md)
+simultaneously.
+
+* **Runtime Layer**. This layer is known as CRI (Container Runtime Interface;
+don't mismatch with [cri-o](https://cri-o.io/) which is also a kind of CRI)
+and responsible for containers and how exactly run it on host. The most known
+(and recommended) CRI is [containerd](https://containerd.io/), and there are
+more interesting implementations like [zeropod](https://github.com/ctrox/zeropod).
+This layer basically consists of kubelet (configuration) and the exact
+installed implementation of the CRI.
+
+* Sometimes it's useful to segregate **Observability Layer**. This is the
+place for different observability services, such as [Prometheus](https://prometheus.io/),
+its exporters, dashboards, logs collectors, tracers, events watchers, etc.
+The exact list of components depends on the implementation.
+
+* **Workloads Layer**. This is the place for you applications' business logic.
+
+It's possible to run ALL of these components right in the same Kubernetes
+cluster (except kubelet and kube-proxy), but usually not recommended for real
+production environments because of reliability and security considerations.
+
+## Quick Summary
+
+As you can see, Kubernetes is a complex platform with many components. You
+have to know at least the essential components to be able to design and
+troubleshoot complex environments. Now you have a "skeleton knowledge",
+let's fill this skeleton with "bricks".

@@ -1,0 +1,28 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    kubernetes.io/metadata.name: default
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-node-lease
+  labels:
+    kubernetes.io/metadata.name: kube-node-lease
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-public
+  labels:
+    kubernetes.io/metadata.name: kube-public
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-system
+  labels:
+    kubernetes.io/metadata.name: kube-system

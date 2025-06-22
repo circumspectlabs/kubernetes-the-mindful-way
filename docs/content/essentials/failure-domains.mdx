@@ -1,0 +1,96 @@
+# Failure Domains
+
+The article clarifies the concept of failure domain which is a foundation
+of the reliability theory and the closest to practice term. The article is
+useful for engineers who want to be more familiar with system design of
+any application, including Kubernetes cluster itself and applications
+running in the cluster.
+
+---
+
+The reliable system is the system, that keeps working as expected even
+after expected/designed number of failures.
+
+To measure the reliability, we will use the following glossary:
+
+**Failure domain** is a logical or physical section with single point of
+failure.
+
+**Single point of failure** (SPOF) is a component in the system, which,
+in case of failure, disrupts the whole failure domain.
+
+## Understanding Failure Domains
+
+Every system has one or more failure domains. Practically, to identify the
+failure domain, you need to assume some point of failure. Let's learn by
+example:
+
+* Cloud regions usually have some number of availability zones. Every
+availability zone is a single failure domain. For sure, it's quite reliable,
+and it's not too probable that some critical component go down, but it's
+still possible. Usually such complex failure domains have some identified
+single point of failure. For clouds, every availability zone is a separated
+datacenter, with its own network, power line (usually more than one),
+and other systems. In case of failure of such system, the datacenter goes
+down, but other datacenters continue working as expected (actually it's
+not that simple, but let's skip it for this time).
+
+    Here's the main though: single datacenter is a single failure domain.
+
+    For more reliability, you can assume a region as a larger failure domain.
+    Some compliance programs even require it! It makes your application more
+    complex, but yes - more reliable if you do things right.
+
+* For on-premise Kubernetes cluster, usually the failure domain is a physical
+instance. However, some datacenters have a few failure domains on different
+levels: racks, power lines, internet gateways, storage services, network
+circuits, etc.
+
+* RAID1 has two failure domains and tolerate single failure. RAID4 has four
+ones and also tolerates single failure. RAID6 has six failure domains and
+tolerates two failures.
+
+The exact calculation of the reliability is a quite complex math. You can
+google this theory, but practically you need to follow these obvious rules:
+
+* Prefer failure domains with similar properties (to ensure the similar
+behavior in every domain).
+
+* More failure domains isn't always better. Remember: some applications have
+specific requirements, such as at least N failure domains available. In that
+case, even single *bad* failure domain might decrease reliability.
+
+* For the same system, you can assume the failure domain differently: from the
+availability zones point of view, or from region one, etc.
+
+* Remember about load balancers, replicas, and dependencies: load balancers
+should be able to identify the working replica, and this replica must
+communicate with a living replica of its dependency, which also must be
+replicated across failure domains.
+
+## The Math of Failure
+
+The short description of the simplified reliability theory:
+
+* For a cloud region with 3 availability zones, but you host entire
+application in a single availability zone, you should have the same uptime
+for the whole application as the availability zone's uptime.
+
+* For a cloud region with 3 availability zones, when you only have a
+stateless application with a replica in every availability zone, you should
+have something like $R=1-\Big(1-0.995\Big)^3=0.999999875$ -> $99,9999$%
+uptime, but practically it's only $99.9$% uptime for the whole region
+(by SLA).
+
+* For a cloud region with 3 availability zones, when you host database,
+backend, and frontend in different availability zones, but every component
+has only one replica, you depend on all failure domains simultaneously, thus
+should have something like $R=0.995^3=0.985$ -> $98,5$% of uptime. This is
+less reliable than running everything in single availability zone.
+
+## Quick Summary
+
+Now you know how to identify the REAL level of reliability of any particular
+component and system. As described above, it's quite simple: identify the
+failure domains, place every workload across them, avoid running dependencies
+of a single app in different domains (to prevent cascade failure).

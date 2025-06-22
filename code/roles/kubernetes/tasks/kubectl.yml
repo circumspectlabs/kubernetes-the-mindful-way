@@ -1,0 +1,46 @@
+###
+### It's always useful when you can just start debuging
+### the instance or cluster. Of course, let's enable it
+### only for root user (because root user anyway have
+### access to necessary files and can build kubeconfig
+### manually).
+###
+- name: Ensure "~/.kube" directory exists
+  ansible.builtin.file:
+    path: "{{ item.home | default('/home/' + item.user) }}/.kube"
+    state: directory
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+    mode: '0700'
+  with_items: &x_items
+    - user: root
+      home: /root
+
+- name: Slurping the kubeconfig CA
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+  register: kubeconfig_pki_ca_slurp
+
+- name: Slurping the kubeconfig client certificate
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_conf_dir }}/pki/client.crt"
+  register: kubeconfig_pki_client_crt_slurp
+
+- name: Slurping the kubeconfig client key
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_conf_dir }}/pki/client.key"
+  register: kubeconfig_pki_client_key_slurp
+
+- name: Provision the kubeconfig
+  ansible.builtin.template:
+    src: kubeconfig/user.j2
+    dest: "{{ item.home | default('/home/' + item.user) }}/.kube/config"
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+    mode: '0600'
+  vars:
+    server: "{{ (kubernetes_profile != 'worker') | ternary('https://127.0.0.1:6443', 'https://' + vrrp_ip + ':6443') }}"
+    certificate_authority_data: "{{ kubeconfig_pki_ca_slurp.content }}"
+    client_certificate_data: "{{ kubeconfig_pki_client_crt_slurp.content }}"
+    client_key_data: "{{ kubeconfig_pki_client_key_slurp.content }}"
+  with_items: *x_items

@@ -1,0 +1,1274 @@
+- hosts: all
+  gather_facts: true
+  gather_timeout: 5
+  become: true
+  tasks:
+    - name: Add necessary for testing utilities (debian-based)
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -xEec
+          - |-
+            apt-get update -qqqy
+            apt-get install -qqqy --no-install-recommends \
+                ca-certificates \
+                curl \
+                dnsutils \
+                nano
+      when: ansible_os_family|lower == 'debian'
+      changed_when: false
+
+    - name: Add necessary for testing utilities (rhel-based)
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -xEec
+          - |-
+            yum install -qqqy \
+                bind-utils \
+                ca-certificates \
+                curl \
+                nano
+      when: ansible_os_family|lower == 'redhat'
+      changed_when: false
+
+- hosts: control-plane
+  gather_facts: true
+  gather_timeout: 5
+  become: true
+  run_once: true
+  tasks:
+    - name: Include required variables
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - roles/kubernetes/defaults/main.yml
+
+    - name: Wait for ready
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -xEec
+          - |-
+            kubectl wait --timeout={{ item.timeout }} -n {{ item.namespace }} pods --for='jsonpath={.status.conditions[?(@.type=="Ready")].status}=True' -l "{{ item.labelset }}"
+        expand_argument_vars: false
+      when: 'kubernetes_cni_vendor == item.name'
+      changed_when: false
+      loop_control:
+        label: "{{ item.name }}"
+      loop:
+        - name: calico
+          namespace: kube-system
+          labelset: k8s-app=calico-node
+          timeout: 90s
+
+    - name: Wait for ready
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -xEec
+          - |-
+            kubectl wait --timeout={{ item.timeout }} -n {{ item.namespace }} pods --for='jsonpath={.status.conditions[?(@.type=="Ready")].status}=True' -l "{{ item.labelset }}"
+        expand_argument_vars: false
+      changed_when: false
+      loop_control:
+        label: "{{ item.name }}"
+      loop:
+        - name: coredns
+          namespace: kube-system
+          labelset: k8s-app=kube-dns
+          timeout: 60s
+        - name: metrics-api
+          namespace: kube-system
+          labelset: app.kubernetes.io/instance=metrics,app.kubernetes.io/name=metrics
+          timeout: 60s
+
+- hosts: control-plane
+  gather_facts: true
+  gather_timeout: 5
+  become: true
+  tasks:
+    - name: Include required variables
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - roles/etcd/defaults/main.yml
+
+    - name: Etcd
+      block:
+        - name: ETCd service is running
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                systemctl status etcd.service
+            expand_argument_vars: false
+
+        - name: ETCd API is available
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                curl --fail -v "https://127.0.0.1:2379/readyz?verbose" \
+                    --header "Host: kubernetes.default.svc.cluster.local" \
+                    --cacert "{{ etcd_conf_dir }}/pki/ca.crt" \
+                    --cert "{{ etcd_conf_dir }}/pki/client.crt" \
+                    --key "{{ etcd_conf_dir }}/pki/client.key"
+            expand_argument_vars: false
+
+        - name: "ETCd E2E check #1"
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                ETCDCTL_API=3 etcdctl member list \
+                    --endpoints=https://127.0.0.1:2379 \
+                    --cacert "{{ etcd_conf_dir }}/pki/ca.crt" \
+                    --cert "{{ etcd_conf_dir }}/pki/client.crt" \
+                    --key "{{ etcd_conf_dir }}/pki/client.key"
+            expand_argument_vars: false
+
+        - name: "ETCd E2E check #2"
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                ETCDCTL_API=3 etcdctlwrapper endpoint status
+            expand_argument_vars: false
+
+    - name: Include required variables
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - roles/kubernetes/defaults/main.yml
+
+    - name: Kubernetes API
+      block:
+        - name: Kubernetes API service is running
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                systemctl status kubernetes-api.service
+            expand_argument_vars: false
+
+        - name: Kubernetes API is available
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                curl --fail -v "https://{{ (api_server_bind_address in ['0.0.0.0', '127.0.0.1']) | ternary('127.0.0.1', api_server_bind_address) }}:6443/healthz?verbose" \
+                    --header "Host: kubernetes.default.svc.cluster.local" \
+                    --cacert "{{ kubernetes_conf_dir }}/pki/ca.crt" \
+                    --cert "{{ kubernetes_conf_dir }}/pki/client.crt" \
+                    --key "{{ kubernetes_conf_dir }}/pki/client.key"
+            expand_argument_vars: false
+
+        - name: Kubernetes API E2E check (kubectl)
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                kubectl cluster-info dump
+            expand_argument_vars: false
+          environment:
+            KUBECONFIG: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+
+    - name: Kubernetes Controller Manager
+      block:
+        - name: Kubernetes Controller Manager service is running
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                systemctl status kubernetes-controller-manager.service
+            expand_argument_vars: false
+
+        - name: Kubernetes Controller Manager is available
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                curl --fail -v "https://127.0.0.1:10257/healthz?verbose" \
+                    --cacert "{{ kubernetes_conf_dir }}/pki/ca.crt" \
+                    --cert "{{ kubernetes_conf_dir }}/pki/client.crt" \
+                    --key "{{ kubernetes_conf_dir }}/pki/client.key"
+            expand_argument_vars: false
+
+    - name: Kubernetes Scheduler
+      block:
+        - name: Kubernetes Scheduler service is running
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                systemctl status kubernetes-scheduler.service
+            expand_argument_vars: false
+
+        - name: Kubernetes Scheduler is available
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                curl --fail -v "https://127.0.0.1:10259/healthz?verbose" \
+                    --cacert "{{ kubernetes_conf_dir }}/pki/ca.crt" \
+                    --cert "{{ kubernetes_conf_dir }}/pki/client.crt" \
+                    --key "{{ kubernetes_conf_dir }}/pki/client.key"
+            expand_argument_vars: false
+
+    - ansible.builtin.set_fact:
+        vlan_ip: "{{ vlan_ip | default(ansible_default_ipv4.address) }}"
+
+    - name: Kubelet
+      block:
+        - name: Kubelet service is running
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                systemctl status kubelet.service
+            expand_argument_vars: false
+
+        - name: Kubelet is available
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                curl --fail -v "https://{{ (kubelet_bind_address in ['0.0.0.0', '127.0.0.1']) | ternary('127.0.0.1', kubelet_bind_address) }}:10250/healthz?verbose" \
+                    --cacert "{{ kubernetes_conf_dir }}/pki/kubelet-ca.crt" \
+                    --cert "{{ kubernetes_conf_dir }}/pki/kubelet-client.crt" \
+                    --key "{{ kubernetes_conf_dir }}/pki/kubelet-client.key"
+            expand_argument_vars: false
+
+    - name: Proxy
+      block:
+        - name: Proxy service is running
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                systemctl status kubernetes-proxy.service
+            expand_argument_vars: false
+
+        - name: Proxy is available
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                curl --fail -v "http://{{ (proxy_bind_address in ['0.0.0.0', '127.0.0.1']) | ternary('127.0.0.1', proxy_bind_address) }}:10256/healthz?verbose"
+            expand_argument_vars: false
+
+    - name: CNI
+      block:
+        - name: Check Kubelet is Ready
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ $(kubectl get nodes -o 'jsonpath={.items[?(@.metadata.name=="{{ ansible_hostname }}")].status.conditions[?(@.type=="Ready")].status}') != "True" ]]; then
+                  exit 1
+                fi
+            expand_argument_vars: false
+
+        - name: Check Calico Workers are running and ready
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ $(kubectl get pods -n kube-system -l k8s-app=calico-node -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' | wc -l) != "{{ groups['all'] | length }}" ]]; then
+                  exit 1
+                fi
+                if [[ $(kubectl get pods -n kube-system -l k8s-app=calico-node -o 'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort -u) != "True" ]]; then
+                  exit 2
+                fi
+            expand_argument_vars: false
+          when: 'kubernetes_cni_vendor == "calico"'
+
+      environment:
+        KUBECONFIG: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+
+    - name: CoreDNS
+      block:
+        - name: Check CoreDNS service deployed with correct ClusterIP
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ "$(kubectl get svc -n kube-system kube-dns -o 'jsonpath={.spec.clusterIP}')" != "{{ kubernetes_dns_service_ip }}" ]]; then
+                  exit 1
+                fi
+            expand_argument_vars: false
+
+        - name: Check CoreDNS is running and ready
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ $(kubectl get pods -n kube-system -l k8s-app=kube-dns -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' | wc -l) != "2" ]]; then
+                  exit 1
+                fi
+                if [[ $(kubectl get pods -n kube-system -l k8s-app=kube-dns -o 'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort -u) != "True" ]]; then
+                  exit 2
+                fi
+            expand_argument_vars: false
+
+        - name: Check CoreDNS is resolving DNS requests
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ $(dig +short @{{ kubernetes_dns_service_ip }} google.com | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' -c) -le "0" ]]; then
+                  exit 1
+                fi
+            expand_argument_vars: false
+
+        - name: Check CoreDNS is resolving Kubernetes services
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ $(dig +short @{{ kubernetes_dns_service_ip }} kube-dns.kube-system.svc.cluster.local) != "{{ kubernetes_dns_service_ip }}" ]]; then
+                  exit 1
+                fi
+                if [[ $(dig +short @{{ kubernetes_dns_service_ip }} kubernetes.default.svc.cluster.local) != "{{ kubernetes_api_service_ip }}" ]]; then
+                  exit 2
+                fi
+            expand_argument_vars: false
+
+      environment:
+        KUBECONFIG: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+
+    - name: Metrics API
+      block:
+        - name: Check Metrics API service is running and ready
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ $(kubectl get pods -n kube-system -l app.kubernetes.io/instance=metrics,app.kubernetes.io/name=metrics -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' | wc -l) != "1" ]]; then
+                  exit 1
+                fi
+                if [[ $(kubectl get pods -n kube-system -l app.kubernetes.io/instance=metrics,app.kubernetes.io/name=metrics -o 'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | sort -u) != "True" ]]; then
+                  exit 2
+                fi
+
+        - name: Check Metrics API service exposes metrics
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ "$(kubectl top pods -n kube-system -l app.kubernetes.io/instance=metrics,app.kubernetes.io/name=metrics | wc -l)" != "2" ]]; then # header and the pod
+                  echo exit 1
+                fi
+            expand_argument_vars: false
+
+        - name: Check Metrics API service exposes metrics
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                if [[ "$(kubectl top pods -n kube-system -l app.kubernetes.io/instance=metrics,app.kubernetes.io/name=metrics | wc -l)" != "2" ]]; then # header and the pod
+                  echo exit 1
+                fi
+            expand_argument_vars: false
+
+      environment:
+        KUBECONFIG: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+
+  environment:
+    PATH: /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+###
+### End-to-end testing of core features
+###
+- hosts: control-plane
+  gather_facts: true
+  gather_timeout: 5
+  become: true
+  run_once: true
+  tasks:
+    - name: Include required variables
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - roles/kubernetes/defaults/main.yml
+
+    - ansible.builtin.set_fact:
+        vlan_ip: "{{ vlan_ip | default(ansible_default_ipv4.address) }}"
+
+    - block:
+        - name: Check Pods controller
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete pods ubuntu-cri-smoke --wait=true --force=true || true ) &>/dev/null
+                kubectl run --rm -i '--overrides={"spec":{"tolerations":[{"operator":"Exists"}]}}' --image=ubuntu:22.04 ubuntu-cri-smoke -- bash -ec 'apt-get update && apt-get install curl ca-certificates -y'
+            expand_argument_vars: false
+
+        - name: Check Services controller
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete pod python-http-server --wait=true || true ) &>/dev/null
+                ( kubectl delete service python-http-server --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: python-http-server
+                  labels:
+                    app: python-http-server
+                spec:
+                  containers:
+                  - name: python
+                    image: python:3.12-alpine
+                    command: ["python", "-m", "http.server", "-b", "0.0.0.0", "8888"]
+                    ports:
+                    - name: http
+                      containerPort: 8888
+                      protocol: TCP
+                    readinessProbe:
+                      httpGet:
+                        path: /
+                        port: 8888
+                      initialDelaySeconds: 3
+                      periodSeconds: 1
+                      timeoutSeconds: 1
+                  terminationGracePeriodSeconds: 1
+                  tolerations:
+                  - operator: Exists
+                ---
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: python-http-server
+                spec:
+                  type: ClusterIP
+                  ports:
+                  - name: http
+                    port: 8080
+                    targetPort: 8888
+                  selector:
+                    app: python-http-server
+                EOF
+                sleep 1
+                kubectl wait '--for=jsonpath={.status.conditions[?(@.type=="Ready")].status}=True' pod/python-http-server
+
+                ###
+                ### Wait for endpoints enabled for service
+                ###
+                for i in {1..30}; do
+                  if [[ "$(kubectl get endpoints python-http-server -o 'jsonpath={range .subsets}entry{"\n"}{end}' | wc -l)" -gt 0 ]]; then
+                    break
+                  fi
+                  sleep 1
+                done
+
+                curl --fail -s -v "http://$(kubectl get service python-http-server -o 'jsonpath={.spec.clusterIP}'):8080"
+
+                ( kubectl delete pod python-http-server --wait=true || true ) &>/dev/null
+                ( kubectl delete service python-http-server --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+
+        - name: Check Jobs controller
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete job just-job --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: batch/v1
+                kind: Job
+                metadata:
+                  name: just-job
+                spec:
+                  backoffLimit: 1
+                  template:
+                    spec:
+                      containers:
+                        - name: job
+                          image: alpine:3.21
+                          command:
+                            - /bin/sh
+                            - -c
+                            - |-
+                              echo SUCCESS
+                      restartPolicy: Never
+                      tolerations:
+                      - operator: Exists
+                EOF
+                kubectl wait --for=condition=complete --timeout=60s job/just-job
+                ( kubectl delete job just-job --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+
+        - name: Check Deployments controller
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete deployments python-http-server --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: python-http-server
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: python-http-server
+                  strategy:
+                    type: RollingUpdate
+                  template:
+                    metadata:
+                      labels:
+                        app: python-http-server
+                    spec:
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command: ["python", "-m", "http.server", "-b", "0.0.0.0", "8888"]
+                          readinessProbe:
+                            httpGet:
+                              path: /
+                              port: 8888
+                              scheme: HTTP
+                            initialDelaySeconds: 5
+                            periodSeconds: 5
+                            timeoutSeconds: 1
+                      terminationGracePeriodSeconds: 1
+                      tolerations:
+                      - operator: Exists
+                EOF
+                kubectl rollout status -w deployment/python-http-server
+
+                # rolling update
+                cat <<EOF | kubectl apply -f -
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: python-http-server
+                spec:
+                  template:
+                    metadata:
+                      labels:
+                        app: python-http-server
+                    spec:
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command: ["python", "-m", "http.server", "-b", "0.0.0.0", "9999"]
+                          readinessProbe:
+                            httpGet:
+                              port: 9999
+                EOF
+                kubectl rollout status -w deployment/python-http-server
+
+                ( kubectl delete deployments python-http-server --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+
+        - name: Check StatefulSets controller
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete statefulset python-http-server --wait=true || true ) &>/dev/null
+                ( kubectl delete service python-http-server --wait=true || true ) &>/dev/null
+                ( kubectl delete pvc data-python-http-server-0 --wait=true || true ) &>/dev/null
+                ( kubectl delete pv python-http-server --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: python-http-server
+                  namespace: default
+                spec:
+                  type: ClusterIP
+                  clusterIP: None
+                  ports:
+                  - name: http
+                    port: 8888
+                    targetPort: 8888
+                  selector:
+                    app: python-http-server
+                ---
+                apiVersion: v1
+                kind: PersistentVolume
+                metadata:
+                  labels:
+                    app: python-http-server
+                  name: python-http-server
+                spec:
+                  accessModes:
+                    - ReadWriteOnce
+                  capacity:
+                    storage: 1Gi
+                  hostPath:
+                    path: /mnt
+                  volumeMode: Filesystem
+                ---
+                apiVersion: apps/v1
+                kind: StatefulSet
+                metadata:
+                  name: python-http-server
+                  namespace: default
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: python-http-server
+                  serviceName: python-http-server
+                  template:
+                    metadata:
+                      labels:
+                        app: python-http-server
+                    spec:
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command: ["python", "-m", "http.server", "-b", "0.0.0.0", "8888"]
+                          readinessProbe:
+                            httpGet:
+                              path: /
+                              port: 8888
+                              scheme: HTTP
+                            initialDelaySeconds: 5
+                            periodSeconds: 5
+                            timeoutSeconds: 1
+                          ports:
+                          - containerPort: 8888
+                            name: http
+                            protocol: TCP
+                          volumeMounts:
+                          - mountPath: /test/data
+                            name: data
+                          - mountPath: /test/tmp
+                            name: tmp
+                      terminationGracePeriodSeconds: 1
+                      tolerations:
+                        - operator: Exists
+                      volumes:
+                        - emptyDir: {}
+                          name: tmp
+                  updateStrategy:
+                    type: RollingUpdate
+                  volumeClaimTemplates:
+                    - metadata:
+                        name: data
+                      spec:
+                        accessModes:
+                          - ReadWriteOnce
+                        resources:
+                          requests:
+                            storage: 1Gi
+                        selector:
+                          matchLabels:
+                            app: python-http-server
+                EOF
+                kubectl wait '--for=jsonpath={.status.conditions[?(@.type=="Ready")].status}=True' pod/python-http-server-0
+                sleep 1
+
+                # discovery with headless service
+                if [[ $(dig +short @{{ kubernetes_dns_service_ip }} python-http-server-0.python-http-server.default.svc.cluster.local) != "$(kubectl get pods python-http-server-0 -o 'jsonpath={.status.podIP}')" ]]; then
+                  echo The IP addresses of the pod and DNS resolve mismatch
+                  exit 1
+                fi
+
+                ( kubectl delete statefulset python-http-server --wait=true || true ) &>/dev/null
+                ( kubectl delete service python-http-server --wait=true || true ) &>/dev/null
+                ( kubectl delete pvc data-python-http-server-0 --wait=true || true ) &>/dev/null
+                ( kubectl delete pv python-http-server --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+
+        - name: Check RBAC
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete rolebinding kubectl --wait=true || true ) &>/dev/null
+                ( kubectl delete role kubectl --wait=true || true ) &>/dev/null
+                ( kubectl delete pods kubectl --wait=true || true ) &>/dev/null
+                ( kubectl delete serviceaccount kubectl --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: kubectl
+                ---
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: Role
+                metadata:
+                  name: kubectl
+                rules:
+                  - apiGroups:
+                      - ""
+                    resources:
+                      - pods
+                    verbs:
+                      - get
+                ---
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: RoleBinding
+                metadata:
+                  name: kubectl
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: Role
+                  name: kubectl
+                subjects:
+                - kind: ServiceAccount
+                  name: kubectl
+                ---
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: kubectl
+                spec:
+                  automountServiceAccountToken: true
+                  containers:
+                    - name: python
+                      image: bitnami/kubectl
+                      command: ["sh"]
+                      tty: true
+                      stdin: true
+                  serviceAccount: kubectl
+                  terminationGracePeriodSeconds: 1
+                  tolerations:
+                    - operator: Exists
+                EOF
+                kubectl wait '--for=jsonpath={.status.conditions[?(@.type=="Ready")].status}=True' pod/kubectl
+
+                # positive
+                kubectl exec -i kubectl -- bash -ec 'kubectl get pods -o name kubectl'
+
+                # negative
+                set +e
+                kubectl exec -i kubectl -- bash -ec 'kubectl get pods -o name'
+                if [[ "$?" == "0" ]]; then
+                  echo "RBAC doesn't work"
+                  exit 1
+                fi
+                set -e
+
+                ( kubectl delete rolebinding kubectl --wait=true || true ) &>/dev/null
+                ( kubectl delete role kubectl --wait=true || true ) &>/dev/null
+                ( kubectl delete pods kubectl --wait=true || true ) &>/dev/null
+                ( kubectl delete serviceaccount kubectl --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+
+        - name: Check Pods intercommunication
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                set -Ee
+                ( kubectl delete deployments python-http-server --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: python-http-server
+                spec:
+                  replicas: 2
+                  selector:
+                    matchLabels:
+                      app: python-http-server
+                  strategy:
+                    type: RollingUpdate
+                  template:
+                    metadata:
+                      labels:
+                        app: python-http-server
+                    spec:
+                {% if (hostvars | dict2items | length) > 1 %}
+                      affinity:
+                        podAntiAffinity:
+                          requiredDuringSchedulingIgnoredDuringExecution:
+                          - labelSelector:
+                              matchLabels:
+                                app: python-http-server
+                            topologyKey: kubernetes.io/hostname
+                {% endif %}
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command: ["python", "-m", "http.server", "-b", "0.0.0.0", "8888"]
+                          readinessProbe:
+                            httpGet:
+                              path: /
+                              port: 8888
+                              scheme: HTTP
+                            initialDelaySeconds: 5
+                            periodSeconds: 5
+                            timeoutSeconds: 1
+                      terminationGracePeriodSeconds: 1
+                      tolerations:
+                      - operator: Exists
+                EOF
+                kubectl rollout status -w deployment/python-http-server
+
+                kubectl get pods -o name -l app=python-http-server
+
+                set -x
+                for pod in $(kubectl get pods -o 'jsonpath={.items[*].metadata.name}' -l app=python-http-server); do
+                  for ip in $(kubectl get pods -o 'jsonpath={.items[*].status.podIP}' -l app=python-http-server); do
+                    kubectl exec -i "${pod}" -- wget -q -T3 -O - "http://${ip}:8888/" | grep -F 'DOCTYPE HTML'
+                  done
+                done
+                set +x
+
+                ( kubectl delete deployments python-http-server --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+
+        - name: Check NetworkPolicies controller
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                ( kubectl delete deployments python-http --wait=true || true ) &>/dev/null
+                ( kubectl delete networkpolicies python-http --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: python-http
+                spec:
+                  replicas: 2
+                  selector:
+                    matchLabels:
+                      app: python-http
+                      pool: python-http
+                  strategy:
+                    type: RollingUpdate
+                  template:
+                    metadata:
+                      labels:
+                        app: python-http
+                        pool: python-http
+                    spec:
+                {% if (hostvars | dict2items | length) > 1 %}
+                      affinity:
+                        podAntiAffinity:
+                          requiredDuringSchedulingIgnoredDuringExecution:
+                          - labelSelector:
+                              matchLabels:
+                                pool: python-http
+                            topologyKey: kubernetes.io/hostname
+                {% endif %}
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command:
+                            - sh
+                            - -c
+                            - |-
+                              python -m http.server -b 0.0.0.0 8888 &
+                              python -m http.server -b 0.0.0.0 9999 &
+                              sleep infinity
+                          readinessProbe:
+                            httpGet:
+                              path: /
+                              port: 8888
+                              scheme: HTTP
+                            initialDelaySeconds: 5
+                            periodSeconds: 5
+                            timeoutSeconds: 1
+                      terminationGracePeriodSeconds: 1
+                      tolerations:
+                      - operator: Exists
+                ---
+                apiVersion: apps/v1
+                kind: NetworkPolicy
+                apiVersion: networking.k8s.io/v1
+                metadata:
+                  name: python-http
+                spec:
+                  policyTypes:
+                  - Ingress
+                  podSelector:
+                    matchLabels:
+                      app: python-http
+                  ingress:
+                    - from:
+                      - podSelector:
+                          matchLabels:
+                            app: python-http
+                      ports:
+                        - port: 8888
+                EOF
+                kubectl rollout status -w deployment/python-http
+                kubectl get pods -o name -l app=python-http
+
+                PODS=($(kubectl get pods -o 'jsonpath={.items[*].metadata.name}' -l pool=python-http))
+                POD_1_NAME="${PODS[0]}"
+                POD_2_NAME="${PODS[1]}"
+                POD_1_IP="$(kubectl get pods -o 'jsonpath={.status.podIP}' ${POD_1_NAME})"
+                POD_2_IP="$(kubectl get pods -o 'jsonpath={.status.podIP}' ${POD_2_NAME})"
+
+                # Positive testing
+                kubectl exec -i "${POD_1_NAME}" -- wget -q -T3 -O - "http://${POD_2_IP}:8888/" | grep -F 'DOCTYPE HTML'
+                kubectl exec -i "${POD_2_NAME}" -- wget -q -T3 -O - "http://${POD_1_IP}:8888/" | grep -F 'DOCTYPE HTML'
+
+                # Negative testing
+                set +e +E
+                kubectl exec -i "${POD_1_NAME}" -- wget -q -T3 -O - "http://${POD_2_IP}:9999/" | grep -F 'DOCTYPE HTML'
+                _RC="$?"
+                set -e -E
+                if [[ "${_RC}" != "1" ]]; then
+                  exit 1
+                fi
+                set +e +E
+                kubectl exec -i "${POD_2_NAME}" -- wget -q -T3 -O - "http://${POD_1_IP}:9999/" | grep -F 'DOCTYPE HTML'
+                _RC="$?"
+                set -e -E
+                if [[ "${_RC}" != "1" ]]; then
+                  exit 1
+                fi
+
+                ( kubectl delete deployments python-http --wait=true || true ) &>/dev/null
+                ( kubectl delete networkpolicies python-http --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+          when: 'kubernetes_cni_vendor in ["calico"]'
+
+        - name: Check admission webhooks
+          ansible.builtin.command:
+            argv:
+              - bash
+              - -xEec
+              - |-
+                # Temporary directory
+                TMPDIR="/tmp/$(openssl rand -base64 40 | tr -d '/+=' | cut -b1-16)"
+                rm -rf "${TMPDIR}" || true
+                mkdir -p "${TMPDIR}"
+
+                # Create CA bundle
+                (
+                    cd "${TMPDIR}"
+                    openssl genrsa -out ca.key 4096
+                    openssl req -x509 -new -key ca.key -days 10000 -out ca.crt -subj "/CN=mutator-ca"
+                )
+                cat <<EOF > "${TMPDIR}/openssl.server.ext"
+                basicConstraints=CA:false
+                keyUsage=digitalSignature
+                extendedKeyUsage=serverAuth
+                subjectAltName=DNS:mutator,DNS:mutator.default,DNS:mutator.default.svc,DNS:mutator.default.svc.cluster.local
+                EOF
+                (
+                    cd "${TMPDIR}"
+                    openssl genrsa -out server.key 4096
+                    openssl req -new -key server.key -out server.csr -subj "/CN=mutator"
+                    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 365 -extfile openssl.server.ext
+                )
+
+                # Create admission controller
+                ( kubectl delete mutatingwebhookconfigurations mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete service mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete secret mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete configmap mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete deployment mutator --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: mutator
+                  namespace: default
+                spec:
+                  type: ClusterIP
+                  ports:
+                  - name: https
+                    port: 8443
+                    protocol: TCP
+                    targetPort: 8443
+                  selector:
+                    app: mutator
+                ---
+                apiVersion: admissionregistration.k8s.io/v1
+                kind: MutatingWebhookConfiguration
+                metadata:
+                  name: mutator
+                webhooks:
+                - name: webhook.example.com
+                  objectSelector:
+                    matchLabels:
+                      "mutate-me": "yes"
+                  rules:
+                  - operations: ["CREATE", "UPDATE"]
+                    apiGroups: [""]
+                    apiVersions: ["v1"]
+                    resources: ["pods"]
+                    scope: "Namespaced"
+                  clientConfig:
+                    service:
+                      namespace: "default"
+                      name: "mutator"
+                      port: 8443
+                      path: /
+                    caBundle: "$(cat "${TMPDIR}/ca.crt" | openssl base64 -e -A)"
+                  admissionReviewVersions: ["v1"]
+                  failurePolicy: Fail
+                  sideEffects: None
+                  timeoutSeconds: 5
+                ---
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: mutator
+                  namespace: default
+                data:
+                  ca.crt: "$(cat "${TMPDIR}/ca.crt" | openssl base64 -e -A)"
+                  server.key: "$(cat "${TMPDIR}/server.key" | openssl base64 -e -A)"
+                  server.crt: "$(cat "${TMPDIR}/server.crt" | openssl base64 -e -A)"
+                type: Opaque
+                ---
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: mutator
+                  namespace: default
+                data:
+                  server.py: |-
+                    import os, json
+                    import ssl
+                    from base64 import b64encode
+                    from datetime import datetime, timezone
+                    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+
+                    class MutatorHandler(BaseHTTPRequestHandler):
+                        # healthcheck
+                        def do_GET(self):
+                            self.send_response(200)
+                            self.end_headers()
+                            self.wfile.write(b'OK')
+
+                        # mutator
+                        def do_POST(self):
+                            if 'Content-Length' not in self.headers:
+                                self.send_response(400)
+                                self.send_header('Content-Length', str(0))
+                                self.end_headers()
+                                return
+
+                            content_length = int(self.headers['Content-Length'])
+                            if self.headers['Content-Type'] != 'application/json':
+                                self.send_response(405)
+                                self.send_header('Content-Length', str(0))
+                                self.end_headers()
+                                return
+
+                            request = json.loads(self.rfile.read(content_length))
+
+                            if (
+                                ('apiVersion' not in request.keys()) or (request['apiVersion'] != 'admission.k8s.io/v1') or
+                                ('kind' not in request.keys()) or (request['kind'] != 'AdmissionReview') or
+                                ('request' not in request.keys()) or ('uid' not in request['request'].keys()) or
+                                ('object' not in request['request'].keys())
+                            ):
+                                self.send_response(422)
+                                self.send_header('Content-Length', str(0))
+                                self.end_headers()
+                                return
+
+                            object = request['request']['object']
+
+                            print(f"RECEIVED MUTATION REQUEST: {json.dumps(object)}")
+
+                            patches = []
+
+                            patches.append({
+                                'op': 'add',
+                                'path': '/metadata/annotations',
+                                'value': {'mutator-touched-at': datetime.now(timezone.utc).isoformat()},
+                            })
+
+                            if ('metadata' in object.keys()) and ('labels' in object['metadata']):
+                                labels = object['metadata']['labels']
+                                if 'mutate-content' in labels.keys():
+                                    patches.append({
+                                        'op': 'add',
+                                        'path': '/metadata/labels',
+                                        'value': {'mutate-result': labels['mutate-content']},
+                                    })
+
+                            response = json.dumps({
+                                'apiVersion': 'admission.k8s.io/v1',
+                                'kind': 'AdmissionReview',
+                                'response': {
+                                    'uid': request['request']['uid'],
+                                    'allowed': True,
+                                    'patchType': 'JSONPatch',
+                                    'patch': b64encode(json.dumps(patches).encode('utf-8')).decode('utf-8'),
+                                }
+                            }).encode('utf-8')
+
+                            self.send_response(200)
+                            self.send_header('Content-Length', str(len(response)))
+                            self.end_headers()
+                            self.wfile.write(response)
+
+                    httpd = HTTPServer(('0.0.0.0', 8443), MutatorHandler)
+                    sslx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER, ssl.PROTOCOL_TLSv1_2)
+                    sslx.load_cert_chain(
+                        certfile=os.environ.get('MUTATOR_CERT_FILE', 'server.crt'),
+                        keyfile=os.environ.get('MUTATOR_KEY_FILE', 'server.key'),
+                    )
+
+                    httpd.socket = sslx.wrap_socket(
+                        sock=httpd.socket,
+                        server_side=True,
+                    )
+
+                    httpd.serve_forever()
+                ---
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: mutator
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: mutator
+                  strategy:
+                    type: RollingUpdate
+                  template:
+                    metadata:
+                      labels:
+                        app: mutator
+                    spec:
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command: ["python", "/opt/code/server.py"]
+                          # command: ["sleep", "infinity"]
+                          env:
+                            - name: MUTATOR_CERT_FILE
+                              value: /opt/secrets/server.crt
+                            - name: MUTATOR_KEY_FILE
+                              value: /opt/secrets/server.key
+                          ports:
+                            - name: https
+                              containerPort: 8443
+                              protocol: TCP
+                          readinessProbe:
+                            httpGet:
+                              path: /
+                              port: 8443
+                              scheme: HTTPS
+                            initialDelaySeconds: 5
+                            periodSeconds: 5
+                            timeoutSeconds: 1
+                          volumeMounts:
+                            - name: code
+                              mountPath: /opt/code
+                              readOnly: true
+                            - name: secrets
+                              mountPath: /opt/secrets
+                              readOnly: true
+                      terminationGracePeriodSeconds: 3
+                      tolerations:
+                        - operator: Exists
+                      volumes:
+                        - name: code
+                          configMap:
+                            name: mutator
+                        - name: secrets
+                          secret:
+                            secretName: mutator
+                EOF
+                rm -rf "${TMPDIR}" || true
+                kubectl rollout status -w deployment/mutator
+                kubectl get pods -o name -l app=mutator
+
+                # Create test pod
+                ( kubectl delete deployment test --wait=true || true ) &>/dev/null
+                cat <<EOF | kubectl create -f -
+                ---
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: test
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: test
+                  strategy:
+                    type: RollingUpdate
+                  template:
+                    metadata:
+                      labels:
+                        app: test
+                        "mutate-me": "yes"
+                    spec:
+                      containers:
+                        - name: python
+                          image: python:3.12-alpine
+                          command: ["sleep", "infinity"]
+                      terminationGracePeriodSeconds: 1
+                      tolerations:
+                        - operator: Exists
+                EOF
+                kubectl rollout status -w deployment/test
+                kubectl get pods -o name -l app=test
+
+                kubectl get pods -o yaml -l app=test | grep -F 'mutator-touched-at'
+
+                ( kubectl delete mutatingwebhookconfigurations mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete service mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete secret mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete configmap mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete deployment mutator --wait=true || true ) &>/dev/null
+                ( kubectl delete deployment test --wait=true || true ) &>/dev/null
+            expand_argument_vars: false
+          run_once: true
+
+      environment:
+        KUBECONFIG: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+        PATH: /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin

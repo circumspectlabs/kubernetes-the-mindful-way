@@ -1,0 +1,16 @@
+- name: Create "control-plane" group
+  ansible.builtin.group:
+    name: control-plane
+    gid: "{{ control_plane_gid }}"
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+- name: Create "control-plane" user
+  ansible.builtin.user:
+    name: control-plane
+    group: control-plane
+    uid: "{{ control_plane_uid }}"
+    shell: /bin/false
+    system: true
+    home: /run/unexists
+    create_home: false
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'

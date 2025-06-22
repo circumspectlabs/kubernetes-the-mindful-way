@@ -1,0 +1,55 @@
+[Unit]
+After=etcd.service
+
+[Service]
+Type=simple
+User=control-plane
+Group=control-plane
+ExecStart=/usr/local/bin/kube-apiserver \
+    --advertise-address={{ vlan_ip }} \
+    --bind-address={{ api_server_bind_address }} \
+    --secure-port=6443 \
+    --tls-cert-file={{ kubernetes_conf_dir }}/pki/server.crt \
+    --tls-private-key-file={{ kubernetes_conf_dir }}/pki/server.key \
+    --allow-privileged=true \
+{% if api_server_rbac_enabled %}
+    --authorization-mode=Node,RBAC \
+{% endif %}
+    --client-ca-file={{ kubernetes_conf_dir }}/pki/ca.crt \
+    --enable-admission-plugins=NodeRestriction \
+    --enable-bootstrap-token-auth=true \
+    --etcd-cafile={{ kubernetes_conf_dir }}/pki/etcd-ca.crt \
+    --etcd-certfile={{ kubernetes_conf_dir }}/pki/etcd-client.crt \
+    --etcd-keyfile={{ kubernetes_conf_dir }}/pki/etcd-client.key \
+    --etcd-servers=https://127.0.0.1:2379 \
+    --kubelet-certificate-authority={{ kubernetes_conf_dir }}/pki/kubelet-ca.crt \
+    --kubelet-client-certificate={{ kubernetes_conf_dir }}/pki/kubelet-client.crt \
+    --kubelet-client-key={{ kubernetes_conf_dir }}/pki/kubelet-client.key \
+    --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname \
+    --proxy-client-cert-file={{ kubernetes_conf_dir }}/pki/aggregator-client.crt \
+    --proxy-client-key-file={{ kubernetes_conf_dir }}/pki/aggregator-client.key \
+    --requestheader-client-ca-file={{ kubernetes_conf_dir }}/pki/aggregator-ca.crt \
+    --requestheader-extra-headers-prefix=X-Remote-Extra- \
+    --requestheader-group-headers=X-Remote-Group \
+    --requestheader-username-headers=X-Remote-User \
+    --service-account-issuer=https://kubernetes.default.svc.cluster.local \
+    --service-account-key-file={{ kubernetes_conf_dir }}/pki/service-account.pub \
+    --service-account-signing-key-file={{ kubernetes_conf_dir }}/pki/service-account.key \
+{% if kubernetes_audit_log_enabled %}
+    --audit-policy-file={{ kubernetes_conf_dir }}/audit-policy.yaml \
+    --audit-log-path={{ kubernetes_audit_log_file }} \
+    --audit-log-compress \
+    --audit-log-format=json \
+    --audit-log-maxbackup={{ kubernetes_audit_log_maxbackup }} \
+    --audit-log-mode=batch \
+{% endif %}
+{% if kubernetes_oidc_auth_enabled %}
+    --authentication-config={{ kubernetes_conf_dir }}/auth-policy.yaml \
+{% endif %}
+    --service-cluster-ip-range={{ kubernetes_service_ip_range }}
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-950
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,312 @@
+import { Callout } from 'nextra/components';
+import Image from 'next/image';
+
+# Kernel, OS, and Hardware
+
+Even in the very containers-orient infrastructure, there is still a place for
+the full-featured operating systems. In this article, we talk about the useful
+hardware, software, and operating system configuration patterns, applied to
+Kubernetes clusters.
+
+This is a must-read for everyone involved to cluster administration and
+maintenance, however still might be helpful for just users and developers,
+especially in terms of performance and troubleshooting.
+
+## Operating Systems
+
+In terms of running Kubernetes environments, there is almost no difference
+between modern ones, such as RedHat 9, Ubuntu 24.04, Debian 12, Alpine 3.22,
+etc. Every operating system can run Kubernetes binaries and has the necessary
+kernel modules, drivers, and software packages. The choice must rely upon the
+existing technical stack.
+
+However, there are some extra variants: running Kubernetes-specific operating
+system, and maintaining own pre-configured distributions.
+
+Always remember about patch management and security SLA of the operating
+system. RedHat and Ubuntu are practically the best ones, and other ones
+may be less responsive in terms of security patching.
+
+The best practice here is preparing image with installed packages, configs,
+secrets (if any), scripts, etc. You can use this image (or snapshot) with
+cloud-init script which enables the node into the cluster.
+
+<Callout type="warning">
+**RedHat 8** uses legacy iptables (the version before nftables) which isn't a
+big issue, but might require some additional configuration. **RedHat 7**
+doesn't support modern containerization because its kernel doesn't support
+cgroupsv2. These tips work for the latest minor versions within major one.
+</Callout>
+
+### Specific Systems
+
+There are community-managed Kubernetes distributions. This is usually some
+configured to run container workloads distribution, with the specific set of
+kernel capabilities and settings, and without just-in-case modules and
+drivers.
+
+At the moment of the book release, there are a few popular solutions:
+
+* [Talos OS](https://github.com/siderolabs/talos). It is a Kubernetes-only
+operating system, minimal, very secure, and tightly hardened. It even has no
+SSH daemon or bash. Practically, it's very complex to operate and especially
+troubleshoot. But the reduced attack surface reduces the maintenance: you
+must only upgrade the Kubernetes binaries, but with the full replacement of
+the nodes (standard nodes rolling update).
+
+* [Kairos](https://kairos.io/). It is a kind of universal operating system,
+but you can build your own boot image with Kubernetes and everything
+necessary for the real cluster deployment.
+
+## Kernel
+
+Although Kubernetes works on all modern kernels, sometimes it's worth to
+know what Linux kernel features Kubernetes use. It might be especially
+important when you build your own Linux distribution, like Google Container
+OS or Talos.
+
+Everything starts from `cgroupsv2`. This is a level of isolation for processes
+on Linux host, which allows distributing and configuring host resources
+precisely by groups of processes. All modern containerization (as well as some
+kinds of virtualization) is built on top of this feature. It is available
+since 4.5 kernel (March 2017), and widely adopted by containerd and different
+CRI implementations. Kubernetes enabled this feature by default on 1.25.
+
+Another important however not absolutely necessary feature is `eBPF`. This is
+a specific way to run small programs directly within the kernel. By security
+reasons, it is not just a kernel module which is usually unrestricted in terms
+of memory access, this is a special virtual machine which works with bytecode
+interpreter. Moreover, you can instruct your kernel running eBPF program for
+some events, such as processing packets like firewall and/or router, collect
+performance and audit events (observability), even verify TLS sessions and
+extract TLS session keys (for kTLS, OpenSSL library, and even directly from
+web servers). This feature is available from Linux kernel 4.4, but became
+feature-rich only since 4.13.
+
+Remember: `cgroupsv2` is necessary for modern CRI implementations, but `eBPF`
+might be necessary (thus not necessary but very recommended) for more specific
+cases, such as CNI (like cilium) and security/audit events (like Falco).
+
+#### Custom Kernels
+
+Of course, for on-premise cases, you might need to build your own kernel.
+For example, if you develop your own cloud (public or internal for a big
+company), you sometimes need to enable some additional kernel features
+(practically, just extra kernel modules with drivers, usually for hardware
+RAID controllers, GPU devices, HSM/TPM drivers, and/or proprietary network
+filesystems) and get rid of unnecessary stuff like bluetooth drivers and
+802.11 stack (to reduce attack surface if motherboard has an embedded Wi-Fi
+adapter).
+
+Practically, it is a complex procedure not only because you have to check
+thousands of switches in the build configuration, but also requires a lot
+of effort for the appropriate level of security, including timely release
+security patches. This is usually not the case for small to middle business
+with on-premise stack, because of significant costs of maintenance.
+
+### Modules
+
+Depending on the operating system, you may have or lack some particular
+modules. Many basic modules are enabled by default, but it is worth ensuring
+that you have the following ones (with `modprobe`):
+
+* `conntrack` is responsible for "stateful" connections handling. It can
+track TCP sessions and allow "previously allowed by other rules" traffic.
+Sometimes you need to install it explicitly (at least for some old RedHat
+systems).
+
+* `nfs` and/or `nfsv4` for NFS mounts, and corresponding modules for other
+types of filesystems. For example, to connect RADOS volumes (Ceph block
+storage), you also need `rbd` module.
+
+* Nvidia, AMD, and other proprietary GPU drivers are also kernel modules.
+For popular Linux distributions, you can install it quite simple, but it
+becomes quite challenging for custom kernels. However, it's necessary for
+GPU workloads (like OpenCL/CUDA programs for data analytics, neural
+engines or low-latency LLM systems).
+
+### Sysctl and Sysfs
+
+`sysctl` (`/proc/sys`) settings control the current (runtime) kernel
+configuration, and `sysfs` (`/sys`) settings control hardware,
+filesystems, devices, etc. parameters.
+
+You should understand that some `sysctl` controls are namespaced (for
+particular control group, thus for particular container), and some of
+them are only available for `systemd` control group (and inherited by
+control groups of containers). You can configure some parameters via
+`securityContext` of Pod manifest, but let's talk about `systemd`-level
+parameters.
+
+There are a plenty of controls and switches there, but these several
+parameters are related to successful and frictionless Kubernetes
+ownership:
+
+* `net.netfilter.nf_conntrack_max` (`sysctl`) option is available after
+loading kernel module `nf_conntrack`, and controls how many connections
+this server can track. This is a kind of capacity for Kubernetes nodes,
+and from some point of scale you may experience lost connections or
+even unstable firewall. It's recommended to increase this amount to
+1 million connections per node, and enable alerts for its capacity
+(in case of high network load or huge microservice tree).
+
+* `kernel.mm.transparent_hugepage.enabled` (`sysfs`) option controls
+the transparent huge pages in Linux kernel memory management system.
+Usually it's enabled by default, and some applications may conflict
+or discourage this feature. Trivial example is Redis servers: since
+they have their own memory allocator and defragmentation approach,
+transparent huge pages can slow down the memory management, thus
+decrease the performance of Redis server. Another examples: OpenSearch,
+Tarantool, Pandas (python library), some neural engines like
+transformers, scikit, pytorch, apparently local non-GPU LLM services,
+etc. However, the impact is overestimated: it's usually less than 1%
+of performance. It's recommended to set to `never`, but mostly for
+compatibility reasons.
+
+* Basic network stack tuning (`sysctl`) is quite useful for
+network-heavy applications like video streaming platforms or in case
+you use network block devices and filesystems like Ceph or iSCSI.
+You may consider adjusting such parameters as:
+
+  - `net.core.netdev_max_backlog` is the size of network interface
+  packets buffer
+  - `net.core.somaxconn` is the size of buffer for accepting
+  connections. It doesn't limit the number of connections, only
+  defines how much connections can simultaneously wait for `accept`
+  syscall
+  - `net.core.rmem_*`, `net.core.wmem_*`, `net.core.optmem_*`,
+  `net.ipv4.tcp_*`, and `net.ipv4.udp_` are responsible for read/write
+  buffers of kernel network stack. It will hardly have effect for less
+  than 10Gb/s network adapters
+  - `net.ipv4.tcp_congestion_control` can significantly improve end
+  user experience for the cases when you need to deliver large files
+  or for long-term connections with sporadic load (e.g. game servers).
+  If you set it to `bbr`, it enables the feature of automatic
+  connection speed adjustment.
+
+* `/sys/block/<devicename>/queue/scheduler` (`sysfs`) controls the IO
+queue scheduler. For most cases, it's enough to set it to `mq-deadline`,
+but keep in mind that it might be better to set it to `noop` or `none`
+if your device supports IO queues at hardware level (or at hypervisor
+level).
+
+This list of useful settings is not comprehensive. Take the time to
+learn all these settings and take a look for publicly available
+resources, such as kernel tuning and hardening guides.
+
+## SWAP
+
+SWAP is a (historical) way to enlarge memory capacity of a server.
+However, it's not only the function of SWAP. For example, standard
+features of Linux kernel can forcibly relocate some memory pages into
+SWAP. For example, kernel modules deconstructors, delayed or rarely
+used functions, etc.
+
+Historically, containers don't work well with SWAP-enabled hosts,
+because the lifecycle of container should be forcibly restarted in case
+of out of memory capacity. SWAP may change that behavior and
+unexpectedly slow down the application, which may produce the
+significant outage. In other words, it's better not having SWAP on the
+container hypervisor.
+
+Although it's not recommended, you still can enable SWAP for Kubernetes
+node, with `failSwapOn: false` kubelet configuration option. It's useful
+sometimes, for local development (hosting Kubernetes within container on
+local machine) or testing purpose. If you run SWAP on Kubernetes node,
+you can "reduce the potential performance damage" with additional `sysctl`
+setting `vm.swappiness = 0` (makes using SWAP practically only for
+special cases, like for module destructors).
+
+<Callout type="warning">
+**Again**: it's not recommended option for production clusters, because
+can make your application unstable.
+</Callout>
+
+## Hardware Equipment
+
+Although there are no specific requirements to the hardware equipment,
+except large enough CPU and memory capacity, sometimes it's really
+convenient to run specific workloads right in Kubernetes. The most
+common example is GPU-backed computation: usually computer vision,
+low-latency stock analytics, neural engines, etc.
+
+### GPU
+
+The approach may differ depending on GPU vendor and how modern your
+device. For modern GPUs, you need to install container
+toolkit (for [Nvidia](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+and [AMD](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/container-runtime/overview.html))
+and run your containers with the new CRI (which is actually a slightly
+reworked `runc`). This allows running multiple GPU applications on a
+single GPU device - if it has enough resources, of course.
+
+For older GPUs, you need to pass GPU device (maybe something else too,
+check the official guide) directly into container. This method lacks
+of parallel run of multiple containers, and may be less stable.
+
+<Callout type="warning">
+Passing GPU directly into container as a device may become a
+significant security issue because GPUs usually have direct access
+to the virtual memory of the server (sometimes even to disk and
+filesystem).
+</Callout>
+
+### HSM and TPM
+
+Hardware Security Module (HSM) is a device which stores one or more
+private key and provides the special API for using that key without
+disclosure. Such devices have a special certification which is
+necessary for some specific cases. The most popular case here is
+the official code signing certificate. Since March 2024, you cannot
+just issue code signing certificate without HSM-certified device.
+However, many companies reasonably prefer to use cloud-located HSM
+devices.
+
+Another helpful module is TPM. This tiny device also handles private
+keys without exposing them (operations like generate, sign, etc.).
+The main difference from HSM is that TPM is simpler and has no special
+certificates like HSM (thus cannot handle code signing certificates,
+although it has all functions for that). However, the main advantage
+of TPM is its ability to build an IAM system for on-premise
+environments using the [SPIFFE](https://spiffe.io/) standard.
+
+## Software
+
+There are a lot of disputs around what's more important: redice attack
+surface or having debug tools at place. The simple truth is that it
+has to be sort of both: add only necessary utilities, because even if
+it is a security breach, for appropriate remediation you need to
+analyze the impact of the breach, thus you need tools.
+
+The exact set of tools is very personal and company-specific. There
+are a few recommendations how to chose wisely:
+
+* You need to be able to debug/troubleshoot in the contianer with
+unchanged capabilities and privileges. It's normal not having root
+permissions, not having privileged mode, and drop all capabilities
+for the application container. Your tools should be helpful in that
+environment.
+
+* If we talk about node debugging tools, consider to install it well
+in advance, because during outage you might have no internet on the
+node.
+
+* Your tools should follow the information security policy (no
+bruteforce utilities, no metasploit, etc), internal development
+contracts, and the documentation related to routines. Even if you
+don't have the formal ones, you usually have informal policies what
+you do and what you don't.
+
+* Do not add another utility because another team member knows only
+that tool.
+
+* Always have an inventory of such tools and control the list of
+installed packages. It will be also helpful while impact analysis.
+
+Keep this list as low as reasonably practicable.
+
+## Quick Summary
+
+Another part is behind! Keep learnin-readin-practice! Now you can
+mindfully design your Kubernetes worker nodes, with bells, whistles
+and whatever you really need.

@@ -1,0 +1,288 @@
+# Admission Controller
+
+Admission Controller of the Kubernetes is one of the most interesting features
+in the whole Kubernetes ecosystem! With that feature, you can intercept API
+calls, and then read the call content before execution (useful for validation
+of the request) and even change parts of the request.
+
+On this page, we shortly walk through this feature, the most known
+implementations, and practice of applying it on real workloads.
+
+## Objects
+
+This feature basically consists of three parts: `ValidationAdmission`,
+`MutatingAdmission`, and `AdmissionPolicy` (available by default since 1.30).
+
+Same as for other Kubernetes features, you use Kubernetes objects in API for
+configuring Admission Controller. There are 2 old and well-known objects and
+one pretty new:
+
+* `ValidatingWebhookConfiguration` is a global, non-namespaced resource in
+Kubernetes that sets up a filter rule for API actions. When this rule is
+triggered, it sends all relevant information about the action to the specified
+endpoint. The Kubernetes API then expects the admission webhook server to
+check if the action is valid and return a 200 status for success or a non-200
+code if there are any issues (with an optional error message).
+
+* The `MutatingWebhookConfiguration` is a global resource similar to
+`ValidatingWebhookConfiguration` object but offers additional functionality
+by allowing action modifications. While validating webhooks only respond with
+status codes and may include optional error or notification message, mutating
+webhooks can also respond with a JSON body containing patches that modify the
+original manifest. This is where you can inject a sidecar container for your
+workload (like Istio does), secrets (e.g. with HashiCorp Vault), security
+policies, and whatever you want in the manifest.
+
+* `ValidatingAdmissionPolicy` is also a global object, but in difference with
+other objects, it doesn't require additional components or endpoints. It is
+and integrated admission controller, which can validate objects by policies
+defined on pretty flexible DSL language, known as CEL. It basically has
+conditions and constraints for detecting which actions should be validated
+(`matchConditions` and `matchConstraints` fields), and the list of CEL
+policies (field `validations`). This integrated controller comes to get rid
+of mess around validation policies, because earlier it had multiple vendors
+(like Kyverno, Open Policy Agent, etc).
+
+## How It Works
+
+You can configure Kubernetes API doing additional webhooks for every create,
+update, and delete action in the cluster. For example, when you configure
+the webhook for every create action for Pod component with specific label,
+Kubernetes API will perform the webhook to the configured endpoint BEFORE
+running the action. The webhook contains the content related to the object
+(like current state, changes in there, who's performing the call, etc), thus
+the endpoint can read this and respond. Depending on the response content
+(return code and body) and the webhook configuration, Kubernetes API decides
+what to do next: cancel call with an exception, continue with notice,
+silently run the action, or apply changes from the response (which might
+differ from original changes).
+
+This pattern allows implementing the flexible manifest validation (for
+example, by some defined security policies), sidecar injection, and just an
+advanced audit of actions in cluster.
+
+You should understand a few important things about Admission Controller:
+
+* It cannot work with read requests (get, list, and watch verbs). Don't even
+think about Kubernetes-native rootkit, it doesn't work here :)
+* The controller can be ignored or bypassed if it doesn't work (configurable).
+Thus, it's pretty redundant feature.
+* The feature intercepts ALL calls by the specified filter (kind, namespace,
+label, etc). Including the calls from other internal controllers. If your
+`StatefulSet` creates `PersistentVolumeClaim` and you have configured to
+intercept that action, the Admission Controller will also perform webhook for
+that. Then you will see in the webhook that it's an action of the internal
+controller (usually it's the `ServiceAccount` of `kuber-controller-manager` or
+one of its sub-`ServiceAccount`-s).
+* The Admission Controller can communicate with external endpoints as well as
+with the internal ones. It means that it's the easiest way to steal `Secret`s
+from the Kubernetes, pretty silently. Thus, always control what your admission
+controllers do.
+* There are a lot of attack vectors for Admission Controller. Follow security
+considerations for running admission services.
+* This feature is so useful, that it's hardly possible to run Kubernetes
+without it.
+* `ValidatingAdmissionPolicy` doesn't require additional services to be
+installed, it's already integrated in Kubernetes API server (if not disabled
+by feature gate).
+* All admission webhooks require secure TLS configuration. You should specify
+CA certificate for verification of the admission controller endpoint. This is
+an important security measure.
+
+## Use Cases
+
+Let's learn by example, because there are a plenty of them, starting from CNI
+and CSI, ending with custom security policies handlers and backup operators.
+
+Please keep in mind that author doesn't take precedence to any of mentioned
+vendors and/or solutions. Here we review how they work, just to find out why
+and for what reason they use admission controller.
+
+### Istio
+
+The main goal of [Istio](https://istio.io/) is expanding the network protocols
+support and flexibility for workloads intercommunication. For example, you can
+enable mutual TLS between pods absolutely transparently for both server and
+client sides of the application.
+
+The main way how Istio enable this functionality, is by their admission
+controller which injects sidecar containers which can manage network rules for
+intercepting incoming and/or outgoing traffic, can start Envoy server (reverse
+proxy) if necessary, apply content modification (e.g. encapsulate into TLS),
+etc.
+
+You can witness this in action after installing Istio and then creating a pod
+with single container (and corresponding labels of course, to activate Istio).
+You set in manifest only one container, but at least 2 appears in the cluster.
+
+### Nginx Ingress Controller
+
+Everyone who worked with Kubernetes knows what is [Nginx Ingress Controller](https://github.com/kubernetes/ingress-nginx),
+but not too many people know that it actually use validating admission webhook
+under the hood.
+
+This Ingress Controller has a lot of configuration options, but still not that
+powerful and flexible as Nginx configuration. After all, Nginx configuration
+is like a specialized language. To reach this gap, the maintainers proposed
+to use snippets in annotations, which controller embeds into its
+configuration. Since engineers can freely shoot their feet (multiple times, in
+multiple ways) with that snippet, including silently leave a security flaw in
+the configuration, maintainers decided to enable some validation here, with
+the integrated admission controller.
+
+### Vault Secrets Injector
+
+[HashiCorp Vault](https://github.com/hashicorp/vault) is a well-know secrets
+storage with a plenty of features. It works pretty fine in Kubernetes cluster,
+and also comes with [the secret injector](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/injector)
+admission controller.
+
+Since Kubernetes `Secret`s aren't secrets actually (because just only
+base64-encoded binary data), one day enterprise starts thinking about more
+secure approach to store secrets for Kubernetes-located workloads. One of the
+options, it enabling secure secrets storage (Vault for this example) and
+automate secrets provisioning into pods. With the secrets injector, you can
+provision secrets without disclosing it on the Kubernetes API level. Only the
+configured Pod is able to read/use the provisioned secret. Of course, it uses
+mutating admission webhook: it adds init and/or sidecar pod which takes the
+requested secrets from Vault, then prepares the environment for the
+application, and when the application has been started then watches for
+changes in secrets.
+
+### Cert Manager
+
+[Cert Manager](https://cert-manager.io/) is a well-known application which
+allows managing TLS certificates by Kubernetes objects. The most popular case
+is issuing LetsEncrypt TLS certificate, which is free and valid in almost all
+browsers.
+
+Unexpectedly, this application uses a mutating admission webhook for
+monitoring newly created certificate requests and processing them directly
+during the API call.
+
+### Stash Operator
+
+[Stash Operator](https://github.com/stashed/stash) is a complex application
+which brings backup functionality for the Kubernetes workloads. It leverages
+sidecar injection (mutating admission webhook) technique. The sidecar
+containers just wait for backup and restore actions from the main controller
+(operator) and perform corresponding actions, including pushing/pulling
+files to/from backup storage, replacing them at place, notifying the
+application, restarting it if necessary, etc.
+
+### Kyverno and Open Policy Agent
+
+[Kyverno](https://kyverno.io/) and [Open Policy Agent](https://www.openpolicyagent.org/)
+are the same-class same-goal extensions of Kubernetes API. They work on top
+of the Kubernetes Admission Controller and just implement policy-based
+restrictions for the management of Kubernetes objects.
+
+You should understand the difference with RBAC. Kubernetes RBAC works on the
+level of overall request parameters, such as kind, verb (action), who
+requested, and is he allowed to request that. These controllers work deeply
+and can also control particular fields in every manifest, with the policies
+definitions.
+
+The story of these components starts many years ago, before Kubernetes showed
+their own Admission Policies (generally available since 1.30).
+
+## Validating Admission Policies
+
+As mentioned above, this is the pretty new feature which must replace all 
+existing implementations of policy engines for Kubernetes manifests. At least,
+it has a good chance to replace existing solutions in favor to the unified
+one.
+
+In difference with the validation and mutation webhooks, this type of
+admission controller objects doesn't require additional services. This is
+already available feature right within Kubernetes API. Just start declaring
+your `ValidatingAdmissionPolicy` objects.
+
+The typical policy consists of match rules (detection rules which answer the
+question "should this policy validate this object/manifest") and validation
+rules itself.
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: coredns.example.tld
+spec:
+  failurePolicy: Fail # or Ignore
+  ###
+  ### Common match rules for the 
+  ###
+  matchConstraints:
+    matchPolicy: Equivalent # or Exact
+    ###
+    ### Namespace selector
+    ###
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    ###
+    ### Label selector
+    ###
+    objectSelector:
+      matchLabels:
+        k8s-app: kube-dns
+    ###
+    ### Kind and verb selectors
+    ###
+    resourceRules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["CREATE", "UPDATE"]
+        resources:   ["pods"]
+    ###
+    ### Anti-selectors (excluders)
+    ###
+    excludeResourceRules: []
+  ###
+  ### More flexible match rules, with all flexibility of CEL
+  ### language. Since CEL expressions have some little CPU consumption,
+  ### it's recommended to prefer the constraints.
+  ###
+  matchConditions:
+    - name: "Just a useless check with valid CEL expression"
+      expression: 'object.apiVersion == "v1"'
+  ###
+  ### Validation rules in CEL language. 
+  ###
+  validations:
+    - expression: 'object.spec.template.spec.containers.all(x, x.image.startsWith(variables.coredns_image + ":"))'
+      message: "There is only one DNS with superpowers, and it's CoreDNS"  # simple message
+      # messageExpression: >-                                              # complex message
+      #   "Expected \"" + variables.coredns_image + "\" image, but "
+      #   + object.spec.template.spec.containers[0].image + " provided"
+      reason: Invalid
+  ###
+  ### You can create variables, with CEL expression. Here let's
+  ### just specify a constant variable.
+  ###
+  variables:
+    - name: coredns_image
+      expression: '"registry.k8s.io/coredns/coredns"'
+```
+
+You can play with CEL language online, with this portal: https://playcel.undistro.io/
+
+You also should definitely review [the official guideline](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/).
+It will be a way simpler to understand it after this page.
+
+## Mutating Admission Policy
+
+`MutatingAdmissionPolicy` is not yet generally available, it's in alpha since
+v1.32. This manifest advances the `ValidatingAdmissionPolicy` with mutations.
+You can specify patch right in the manifest. However, this object has a very
+limited usage, only for simple cases, for example for enforcing drop of all
+capabilities if no one specified (kinda change of the default capabilities).
+For more complex cases, it's more preferable to write your own admission
+controller engine, it's not that difficult.
+
+## Quick Summary
+
+Admission Controller is one of the features of Kubernetes, that everyone use or
+used, but not too many know how it really work. Welcome to the family, now you
+know what it is, how it work, how to use it, and the most useful is how to fix
+that in case of issues.

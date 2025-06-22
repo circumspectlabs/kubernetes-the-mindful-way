@@ -1,0 +1,19 @@
+[Unit]
+After=kubernetes-api.service kubernetes-controller-manager.service kubernetes-scheduler.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kubelet \
+    --kubeconfig={{ kubernetes_conf_dir }}/config/kubelet \
+    --config={{ kubelet_conf_dir }}/kubelet-config.yaml \
+    --hostname-override={{ inventory_hostname }} \
+    --node-ip={{ vlan_ip }} \
+    --node-labels={{ node_labels | dict2items | map('json_query', jq) | join(',') }} \
+    --cloud-provider=
+Restart=on-failure
+StartLimitInterval=0
+RestartSec=10
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target

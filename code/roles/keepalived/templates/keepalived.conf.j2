@@ -1,0 +1,44 @@
+global_defs {
+    router_id {{ inventory_hostname | hash('md5') }}
+}
+
+vrrp_script kubelet_ok {
+  script "/usr/local/bin/vrrp-kubelet-ok"
+  interval 5
+  timeout 4
+  weight 50
+}
+
+vrrp_script etcd_leader {
+  script "/usr/local/bin/vrrp-etcd-leader"
+  interval 5
+  timeout 4
+  weight 10
+}
+
+vrrp_instance {{ keepalived_vrrp_instance }} {
+    state BACKUP
+    interface {{ keepalived_interface }}
+    virtual_router_id {{ keepalived_router_id }}
+    priority 100
+    advert_int 1
+    virtual_ipaddress {
+        {{ vrrp_ip }}/{{ keepalived_network_cidr | ansible.utils.ipaddr('prefix') }}
+    }
+    track_script {
+        kubelet_ok
+        etcd_leader
+    }
+    authentication {
+        auth_type AH
+        auth_pass {{ keepalived_password }}
+    }
+{% if not keepalived_multicast_available %}
+    unicast_src_ip {{ keepalived_unicast_source_address }}
+    unicast_peer {
+{% for item in keepalived_unicast_peer_addresses %}
+        {{ item }}
+{% endfor %}
+    }
+{% endif %}
+}

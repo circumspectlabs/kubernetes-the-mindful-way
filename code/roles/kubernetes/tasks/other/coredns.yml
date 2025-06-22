@@ -1,0 +1,7 @@
+- name: Enable CoreDNS components
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'other/coredns.manifests.j2') | from_yaml_all }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  changed_when: false
+  run_once: true

@@ -1,0 +1,54 @@
+- ansible.builtin.set_fact:
+    ipv4_rules: "/etc/iptables/rules.v4"
+    ipv6_rules: "/etc/iptables/rules.v6"
+    firewal_persistence_service: "netfilter-persistent.service"
+  when: ansible_os_family|lower == 'debian'
+
+- ansible.builtin.set_fact:
+    ipv4_rules: "/etc/sysconfig/iptables"
+    ipv6_rules: "/etc/sysconfig/ip6tables"
+    firewal_persistence_service: "iptables.service"
+  when: ansible_os_family|lower == 'redhat'
+
+- name: Install firewall persistence daemon (debian)
+  ansible.builtin.apt:
+    name:
+      - iptables-persistent
+  when: ansible_os_family|lower == 'debian'
+  become: true
+
+- name: Install firewall persistence daemon (redhat)
+  ansible.builtin.dnf:
+    name:
+      - iptables-services
+  when: ansible_os_family|lower == 'redhat'
+  become: true
+
+- name: Configure firewall rules
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dst }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop_control:
+    label: "{{ item.name }}"
+  loop:
+    - name: ipv4
+      src: "firewall/ipv4-rules"
+      dst: "{{ ipv4_rules }}"
+    - name: ipv6
+      src: "firewall/ipv6-rules"
+      dst: "{{ ipv6_rules }}"
+  notify:
+    - iptables-restore
+  become: true
+
+- name: Enable service
+  ansible.builtin.systemd_service:
+    name: "{{ firewal_persistence_service }}"
+    state: started
+    enabled: true
+  become: true
+
+- ansible.builtin.meta: flush_handlers

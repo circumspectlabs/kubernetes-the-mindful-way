@@ -1,0 +1,309 @@
+###
+### Careful! Default IP of the real instance might be
+### a public ip, but here only private network IP is
+### expected.
+###
+- ansible.builtin.set_fact:
+    vlan_ip: "{{ ansible_default_ipv4.address }}"
+
+- name: Create "etcd" group
+  ansible.builtin.group:
+    name: etcd
+    gid: "{{ etcd_gid }}"
+
+- name: Create "etcd" user
+  ansible.builtin.user:
+    name: etcd
+    group: etcd
+    uid: "{{ etcd_uid }}"
+    shell: /bin/false
+    system: true
+    home: /run/unexists
+    create_home: false
+
+- name: Ensure Etcd directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: etcd
+    group: etcd
+    mode: '0700'
+  loop:
+    - "{{ etcd_conf_dir }}"
+    - "{{ etcd_conf_dir }}/pki"
+    - "{{ etcd_conf_dir }}/pki/peer"
+    - "{{ etcd_data_dir }}"
+
+###
+### Initialize two DIFFERENT certificate authorities
+###
+- name: Create Etcd CA key
+  community.crypto.openssl_privatekey:
+    path: "{{ etcd_conf_dir }}/pki/{{ item }}.key"
+    owner: root
+    group: root
+    mode: '0600'
+  run_once: true
+  with_items:
+    - ca
+    - peer/ca
+
+- name: Create Etcd CA certificate sign request (self)
+  community.crypto.openssl_csr:
+    path: "{{ etcd_conf_dir }}/pki/{{ item }}.csr"
+    privatekey_path: "{{ etcd_conf_dir }}/pki/{{ item }}.key"
+    common_name: etcd-{{ item | replace('/', '-') }}
+    basic_constraints:
+      - CA:TRUE
+    basic_constraints_critical: true
+    owner: root
+    group: root
+    mode: '0600'
+  run_once: true
+  with_items:
+    - ca
+    - peer/ca
+
+- name: Create Etcd CA certificate
+  community.crypto.x509_certificate:
+    path: "{{ etcd_conf_dir }}/pki/{{ item }}.crt"
+    privatekey_path: "{{ etcd_conf_dir }}/pki/{{ item }}.key"
+    csr_path: "{{ etcd_conf_dir }}/pki/{{ item }}.csr"
+    entrust_not_after: "+3650d" # 10 years
+    provider: selfsigned
+    owner: root
+    group: etcd
+    mode: '0640'
+  run_once: true
+  with_items:
+    - ca
+    - peer/ca
+
+- name: Get Etcd CA
+  ansible.builtin.slurp:
+    src: "{{ etcd_conf_dir }}/pki/{{ item }}"
+  register: etcd_slurp
+  run_once: true
+  with_items:
+    - ca.key
+    - ca.crt
+    - peer/ca.key
+    - peer/ca.crt
+
+- ansible.builtin.set_fact:
+    etcd_ca_key: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
+    etcd_ca_crt: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
+    etcd_peer_ca_key: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'peer/ca.key') | map(attribute='content') | first | b64decode }}"
+    etcd_peer_ca_crt: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'peer/ca.crt') | map(attribute='content') | first | b64decode }}"
+
+- name: Put Etcd CA files
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ etcd_conf_dir }}/pki/{{ item.file }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: '{{ item.mode }}'
+  loop_control:
+    label: "{{ item.file }}"
+  with_items:
+    - content: "{{ etcd_ca_key }}"
+      owner: root
+      group: root
+      mode: '0600'
+      file: ca.key
+    - content: "{{ etcd_ca_crt }}"
+      owner: root
+      group: etcd
+      mode: '0640'
+      file: ca.crt
+    - content: "{{ etcd_peer_ca_key }}"
+      owner: root
+      group: root
+      mode: '0600'
+      file: peer/ca.key
+    - content: "{{ etcd_peer_ca_crt }}"
+      owner: root
+      group: etcd
+      mode: '0640'
+      file: peer/ca.crt
+
+###
+### Create server and client keys and certificates
+###
+- name: Create Etcd server and peer keys
+  community.crypto.openssl_privatekey:
+    path: "{{ etcd_conf_dir }}/pki/{{ item }}"
+    owner: etcd
+    group: etcd
+    mode: '0600'
+  loop:
+    - peer.key
+    - server.key
+
+- name: Create Etcd peer certificate sign request
+  community.crypto.openssl_csr:
+    path: "{{ etcd_conf_dir }}/pki/peer.csr"
+    privatekey_path: "{{ etcd_conf_dir }}/pki/peer.key"
+    common_name: etcd-peer
+    key_usage:
+      - digitalSignature
+    extended_key_usage:
+      - clientAuth
+      - serverAuth
+    subject_alt_name:
+      - IP:127.0.0.1
+      - IP:{{ vlan_ip }}
+      - DNS:localhost
+    owner: etcd
+    group: etcd
+    mode: '0600'
+
+- name: Create Etcd peer certificate
+  community.crypto.x509_certificate:
+    path: "{{ etcd_conf_dir }}/pki/peer.crt"
+    csr_path: "{{ etcd_conf_dir }}/pki/peer.csr"
+    ownca_path: "{{ etcd_conf_dir }}/pki/peer/ca.crt"
+    ownca_privatekey_path: "{{ etcd_conf_dir }}/pki/peer/ca.key"
+    entrust_not_after: "+3650d"
+    provider: ownca
+    owner: etcd
+    group: etcd
+    mode: '0600'
+  notify:
+    - etcd daemon-restart
+
+- name: Create Etcd server certificate sign request
+  community.crypto.openssl_csr:
+    path: "{{ etcd_conf_dir }}/pki/server.csr"
+    privatekey_path: "{{ etcd_conf_dir }}/pki/server.key"
+    common_name: etcd-server
+    key_usage:
+      - digitalSignature
+    extended_key_usage:
+      - serverAuth
+    subject_alt_name:
+      - IP:127.0.0.1
+      - IP:{{ vlan_ip }}
+      - IP:{{ vrrp_ip }}
+      - DNS:localhost
+    owner: etcd
+    group: etcd
+    mode: '0600'
+
+- name: Create Etcd server certificate
+  community.crypto.x509_certificate:
+    path: "{{ etcd_conf_dir }}/pki/server.crt"
+    csr_path: "{{ etcd_conf_dir }}/pki/server.csr"
+    ownca_path: "{{ etcd_conf_dir }}/pki/ca.crt"
+    ownca_privatekey_path: "{{ etcd_conf_dir }}/pki/ca.key"
+    entrust_not_after: "+3650d" # 10 years
+    provider: ownca
+    owner: etcd
+    group: etcd
+    mode: '0600'
+  notify:
+    - etcd daemon-restart
+
+- name: Create Etcd client key
+  community.crypto.openssl_privatekey:
+    path: "{{ etcd_conf_dir }}/pki/{{ item }}"
+    owner: etcd
+    group: etcd
+    mode: '0640'
+  loop:
+    - client.key
+
+- name: Create Etcd client certificate sign request
+  community.crypto.openssl_csr:
+    path: "{{ etcd_conf_dir }}/pki/client.csr"
+    privatekey_path: "{{ etcd_conf_dir }}/pki/client.key"
+    common_name: etcd-client
+    key_usage:
+      - digitalSignature
+    extended_key_usage:
+      - clientAuth
+    owner: etcd
+    group: etcd
+    mode: '0600'
+
+- name: Create Etcd client certificate
+  community.crypto.x509_certificate:
+    path: "{{ etcd_conf_dir }}/pki/client.crt"
+    csr_path: "{{ etcd_conf_dir }}/pki/client.csr"
+    ownca_path: "{{ etcd_conf_dir }}/pki/ca.crt"
+    ownca_privatekey_path: "{{ etcd_conf_dir }}/pki/ca.key"
+    entrust_not_after: "+3650d"
+    provider: ownca
+    owner: etcd
+    group: etcd
+    mode: '0640'
+  notify:
+    - etcd daemon-restart
+
+- name: Download Etcd binaries
+  ansible.builtin.get_url:
+    url: https://github.com/etcd-io/etcd/releases/download/v{{ etcd_version }}/etcd-v{{ etcd_version }}-linux-{{ machine_arch_map[ansible_architecture] }}.tar.gz
+    dest: /tmp/etcd.tar.gz
+    mode: '0644'
+    force: "{{ etcd_force_upgrade }}"
+  changed_when: false
+  retries: 3
+
+- name: Install Etcd binaries
+  ansible.builtin.unarchive:
+    src: "/tmp/etcd.tar.gz"
+    dest: "/usr/local/bin/"
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+    include:
+      - etcd-v{{ etcd_version }}-linux-{{ machine_arch_map[ansible_architecture] }}/etcd
+      - etcd-v{{ etcd_version }}-linux-{{ machine_arch_map[ansible_architecture] }}/etcdctl
+      - etcd-v{{ etcd_version }}-linux-{{ machine_arch_map[ansible_architecture] }}/etcdutl
+    extra_opts:
+      - --strip-components
+      - 1
+  notify:
+    - etcd daemon-restart
+
+- name: Configure Etcd systemd unit
+  ansible.builtin.template:
+    src: etcd.service.j2
+    dest: /etc/systemd/system/etcd.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - etcd daemon-restart
+  register: etcd_systemd_unit_template
+
+- name: daemon-reload
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  timeout: 15
+  when: etcd_systemd_unit_template.changed
+
+- name: Enable Etcd service
+  ansible.builtin.systemd_service:
+    name: etcd.service
+    state: started
+    enabled: true
+  timeout: 15
+
+- ansible.builtin.meta: flush_handlers
+
+###
+### This is an optional play to configure shortcuts for
+### direct communication with etcd. It's very useful for
+### troubleshooting and scripting.
+###
+- name: Deliver helper scripts
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: /usr/local/bin/{{ item }}
+    owner: root
+    group: root
+    mode: '0755'
+  with_items:
+    - etcdctlwrapper

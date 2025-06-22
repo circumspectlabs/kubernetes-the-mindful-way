@@ -1,0 +1,39 @@
+[Unit]
+After=kubernetes-api.service
+
+[Service]
+Type=simple
+User=control-plane
+Group=control-plane
+ExecStart=/usr/local/bin/kube-controller-manager \
+    --bind-address={{ controller_manager_bind_address }} \
+    --secure-port=10257 \
+    --tls-cert-file={{ kubernetes_conf_dir }}/pki/controller-manager-server.crt \
+    --tls-private-key-file={{ kubernetes_conf_dir }}/pki/controller-manager-server.key \
+    --allocate-node-cidrs=true \
+    --authentication-kubeconfig={{ kubernetes_conf_dir }}/config/controller-manager \
+    --authorization-kubeconfig={{ kubernetes_conf_dir }}/config/controller-manager \
+    --client-ca-file={{ kubernetes_conf_dir }}/pki/ca.crt \
+    --cluster-cidr={{ kubernetes_cluster_ip_range }} \
+    --cluster-name={{ kubernetes_cluster_name }} \
+    --cluster-signing-cert-file={{ kubernetes_conf_dir }}/pki/ca.crt \
+    --cluster-signing-key-file={{ kubernetes_conf_dir }}/pki/ca.key \
+    --controllers=*,bootstrapsigner,tokencleaner \
+    --kubeconfig={{ kubernetes_conf_dir }}/config/controller-manager \
+    --leader-elect=true \
+    --requestheader-client-ca-file={{ kubernetes_conf_dir }}/pki/aggregator-ca.crt \
+    --requestheader-extra-headers-prefix=X-Remote-Extra- \
+    --requestheader-group-headers=X-Remote-Group \
+    --requestheader-username-headers=X-Remote-User \
+    --root-ca-file={{ kubernetes_conf_dir }}/pki/ca.crt \
+    --service-account-private-key-file={{ kubernetes_conf_dir }}/pki/service-account.key \
+    --service-cluster-ip-range={{ kubernetes_service_ip_range }} \
+    --use-service-account-credentials=true \
+    --kube-api-burst=75 \
+    --kube-api-qps=50
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-950
+
+[Install]
+WantedBy=multi-user.target

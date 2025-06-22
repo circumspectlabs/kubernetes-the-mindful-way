@@ -1,0 +1,165 @@
+# Smart Objects Storage
+
+This article explains another pattern applied in Kubernetes. Same as for
+[Finite State Machines](/en/essentials/finite-state-machines), this article
+will be helpful for every engineer who works with Kubernetes.
+
+---
+
+When you learn something, it's always useful to compare
+solution/product/system/anything with something. After a few iterations, you
+can identify similar patterns in different solutions.
+
+In that case, Kubernetes seems quite remarkable and even unique from some points.
+It might be an invention, but I want to introduce the new pattern and name it
+**"Smart Objects Storage"**. The main attributes of this system pattern are the
+following:
+
+* It stores objects which might be represented in some well-structured format.
+For Kubernetes, every manifest (like for Pod, Deployment, Node, NetworkPolicy,
+etc.) is a presentation of an object.
+
+* There are finite state machines which control the state and sometimes the
+attributes of an object. Please read more about finite state machines in [another topic](/en/essentials/finite-state-machines).
+Every machine can work with one or more objects and perform actions. The main
+purpose of these machines is syncing the state of the objects (i.e. pod status)
+with the actions (i.e. deploying a pod, or horizontal scaling of a deployment).
+
+By the way, the closer research of the pattern reveals that it is absolutely
+applicable to other technologies, including but not limiting to OpenStack,
+public clouds (such as AWS, Google Cloud, Azure, DigitalOcean, etc.), and other
+products.
+
+## Objects and Machines
+
+Every native object has some schema (the "shape" of object), and every state machine
+is described in code, within components of Kubernetes.
+
+Let's learn by example: look at these object from a new point of view. Pod and Node
+are the most complex objects, and the simplest one is, unexpectedly, Deployment.
+
+### Pods
+
+Pods have a multi-stage status, with the chain of states at least like Pending
+→ Running → Succeeded. Every transition between states has its own state
+machine, and usually more than one! For example, the state "Pending" has its own
+chain of states, at least Pulling → CRI (creating the containers) → CNI
+(configuring networking, assigning IP, firewall rules, etc.). See
+[Pod Lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/)
+topic for details.
+
+But these stages only explain the lifecycle of the pod. There are also the state
+machines for:
+
+* **Liveness, readyness, statup probes.** They start watching the pod. In case of
+change of probes' response, they correspondingly change the object and mark it as
+"NotReady". This transition usually activates another state machine which excludes
+this pod from the endpoints of the service. More details about this set of state
+machines is available in [Configure Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+topic.
+
+* **Ephemeral containers.** The relevant state machine expects the new ephemeral
+container for this pod (because it's one of mutable fields of the manifest), and
+can activate the corresponding changes in CRI (create container, start some
+payload in there, etc.). More details are in the [Ephemeral Containers](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
+topic.
+
+* **Pod Resize.** This automation is enabled by default only since `v1.33`, for
+previous versions you need to enable `kube:InPlacePodVerticalScaling=true`
+feature gate. It allows changing requests and limits of a pod directly without
+restart. This state machine watches the Pod manifest's option `.spec.containers[*].resources`
+and performs corresponding API calls to CRI. More details are in the
+[In Place Pod Resize](https://kubernetes.io/blog/2023/05/12/in-place-pod-resize-alpha/)
+topic. Some state machines might be disabled by default.
+
+* Many other state machines. It's hardly possible to mention every feature
+in single topic.
+
+Most of all Pod state machines (their source code) are located in `controler-manager`
+and `kubelet` components.
+
+### Node
+
+Similarly to Pod kind, the Node has lifecycle and many other controllers.
+Let's try to enumerate some of them (not a full list):
+
+* **Node registration.** The first attempt to communicate with the control
+plane must register the new Node. Normally, the `kubelet` must perform it
+automatically. De facto, the `kubelet` must have enough permissions for
+this operation, and it's tricky in terms of security of it. In addition,
+you usually cannot directly create a Node, because it's a system object
+with very custom state machines.
+
+* **Node networking.** This is a complex set of the state machines which is
+responsible for configuring the container networking, IP addresses, firewall
+rules, NAT and mangling rules, etc.
+
+* **Node conditions.** When your node runs out of memory or capacity of
+some resource, it goes into the "SomethingPressure" mode. This state machine
+can identify that condition on the node, and then enable the taint for the
+corresponding node (i.e. "NoSchedule" taint to stop scheduling the new
+workloads on this node).
+
+* **Images storage.** This set of state machines controls the available
+container images and cleanups them if necessary. It also exposes a limited
+set of available images in the Node objects (see `.status` of the Node).
+
+* Other state machines.
+
+Most of all relevant state machines are located in `kubelet` and `kube-proxy`
+components, and partially in CRI and CNI.
+
+### Deployment
+
+As defined above, it's one of the simplest state machines. The only
+responsibility of this object is creating the new ReplicaSet (child object
+with strong dependency) correspondingly to the applied changes, and then
+one-by-one change the parameter `.spec.replicas` for the new and the old
+ReplicaSet objects. That's it. Deployment object includes the full
+description of the ReplicaSet, and ReplicaSet includes the full description
+of the Pod, but Deployment is only responsible for creating the new version
+of ReplicaSet and migration between them.
+
+These state machines are in `controller-manager` component.
+
+## Custom Resource Definitions
+
+These objects (Kubernetes kind "CustomResourceDefinition") just enable the
+smart objects storage managing non-native objects. You create CRD and then
+cat put the objects of the new type (the new Kubernetes kind) into the place
+available for the whole cluster. But these objects do nothing yet, because
+they don't have any state machine. The Kubernetes operators enable the
+intended functionality for the Kubernetes cluster, usually with CRDs.
+
+For example, there is a well-known operator [cert-manager](https://cert-manager.io/docs/).
+This operator enables the ability to manage TLS/SSL certificates, in
+different ways. The Helm chart of this solution deploys [CRDs](https://github.com/cert-manager/cert-manager/tree/v1.16.2/deploy/crds)
+and the [controllers](https://github.com/cert-manager/cert-manager/tree/v1.16.2/deploy/charts/cert-manager)
+with the corresponding state machines.
+
+This component has no native state machine, but the logic of how to work with
+CRDs is in `kubeapi` component.
+
+### Ingress
+
+This is a strange object, because it NATIVELY doesn't have any state machine,
+but it is enabled by default for any cluster. There is a native Kubernetes
+kind, but it has no any native logic!
+
+The Kubernetes developers team decided to drop the implementation of the L7
+routing within the cluster, and provide the cluster's administrators to pick
+the best fit controller. All Ingress Controllers do the same job with the
+Ingress objects, and every controller does it in its own way.
+
+Some Ingress Controllers don't use the Ingress object and prefer to create
+CRDs with different jsonschema (like [Traefik IngressRoute](https://doc.traefik.io/traefik/providers/kubernetes-crd/) objects).
+
+There are a plenty of Kubernetes Ingress Controllers, the list of available
+ones is here: https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/
+
+## Quick Summary
+
+Smart Objects Storage is an "invented" pattern, but it explains almost
+everything what happen in Kubernetes. This is a kind of "foundational" or
+"framing" knowledge which helps to connect all of your experience and
+knowledge about Kubernetes.

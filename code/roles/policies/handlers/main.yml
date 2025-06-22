@@ -1,0 +1,32 @@
+- name: reload services
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+
+- name: restart timesyncd
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd.service
+    state: restarted
+  become: true
+
+- name: restart sshd
+  ansible.builtin.systemd_service:
+    name: "{{ daemon_name }}.service"
+    state: restarted
+  become: true
+  vars:
+    daemon_name: "{{ ((ansible_os_family|lower) == 'debian') | ternary('ssh', 'sshd') }}"
+
+- name: dpkg-reconfigure unattended-upgrades
+  ansible.builtin.shell:
+    cmd: dpkg-reconfigure -plow -fnoninteractive unattended-upgrades
+    executable: /bin/bash
+  become: true
+
+- name: iptables-restore
+  ansible.builtin.shell:
+    cmd: |-
+      iptables-restore --noflush --wait 5 "{{ ipv4_rules }}"
+      ip6tables-restore --noflush --wait 5 "{{ ipv6_rules }}"
+    executable: /bin/bash
+  become: true

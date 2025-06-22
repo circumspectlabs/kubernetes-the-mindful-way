@@ -1,0 +1,52 @@
+- ansible.builtin.set_fact:
+    cni_vendor_available: "{{ cni_playbooks | map('regex_replace', '^.*/(.+)\\.ya?ml$', '\\1') | list }}"
+  vars:
+    cni_playbooks: "{{ (lookup('ansible.builtin.fileglob', '../tasks/cni/*.yml') | join('') | split(',')) + (lookup('ansible.builtin.fileglob', '../tasks/cni/*.yaml') | join('') | split(',')) | select() }}"
+
+- name: "Select CNI"
+  ansible.builtin.debug:
+    msg: |-
+      Unsupported "{{ kubernetes_cni_vendor }}" CNI.
+  failed_when: yes
+  when: kubernetes_cni_vendor not in cni_vendor_available
+
+- name: "Configure CNI: {{ kubernetes_cni_vendor }}"
+  ansible.builtin.include_tasks: cni/{{ kubernetes_cni_vendor }}.yml
+
+- name: Wait for node ready
+  ansible.builtin.command:
+    argv:
+      - bash
+      - -c
+      - |-
+        _READY=false
+        for i in $(seq 300); do
+          if [[ $(kubectl get nodes -o 'jsonpath={.items[*].status.conditions[?(@.type=="Ready")].status}') == "$(seq $(kubectl get nodes -o name | wc -l) | awk '{print "True"}' | xargs echo)" ]]; then
+            _READY=true
+            break
+          fi
+          sleep 1
+        done
+        if [[ "${_READY}" != "true" ]]; then
+          ###
+          ### Export sorta debug information
+          ###
+          echo =============================
+          systemctl status
+          echo =============================
+          systemctl status kubernetes-proxy.service
+          journalctl -xeu kubernetes-proxy.service
+          echo =============================
+          systemctl status kubelet.service
+          journalctl -xeu kubelet.service
+          echo =============================
+          kubectl describe nodes
+          echo =============================
+          kubectl describe pods -A
+          echo =============================
+          exit 1
+        fi
+  environment:
+    KUBECONFIG: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+  changed_when: false
+  run_once: true

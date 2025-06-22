@@ -1,0 +1,26 @@
+[Unit]
+After=kubernetes-api.service
+
+[Service]
+Type=simple
+User=control-plane
+Group=control-plane
+ExecStart=/usr/local/bin/kube-scheduler \
+    --bind-address={{ scheduler_bind_address }} \
+    --secure-port=10259 \
+    --tls-cert-file={{ kubernetes_conf_dir }}/pki/scheduler-server.crt \
+    --tls-private-key-file={{ kubernetes_conf_dir }}/pki/scheduler-server.key \
+    --authentication-kubeconfig={{ kubernetes_conf_dir }}/config/scheduler \
+    --authorization-kubeconfig={{ kubernetes_conf_dir }}/config/scheduler \
+    --kubeconfig={{ kubernetes_conf_dir }}/config/scheduler \
+    --requestheader-client-ca-file={{ kubernetes_conf_dir }}/pki/aggregator-ca.crt \
+    --requestheader-extra-headers-prefix=X-Remote-Extra- \
+    --requestheader-group-headers=X-Remote-Group \
+    --requestheader-username-headers=X-Remote-User \
+    --leader-elect=true
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-950
+
+[Install]
+WantedBy=multi-user.target

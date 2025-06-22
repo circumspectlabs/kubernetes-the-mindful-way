@@ -1,0 +1,183 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: default
+  options:
+    managed: True
+  settings:
+    ###
+    ### Timeout of waiting node ready. Default: 300
+    ###
+    timeout: 180
+    ###
+    ### DNS suffix for automatic resolve within emulated network. Default: molecule.local
+    ###
+    dns_suffix: "molecule.local"
+    ###
+    ### Network address and CIDR. Must not conflict with your networks, but default is from
+    ### carrier-grade NAT space (utterly rarely produce conflicts) thus should be no problem
+    ### with this default. Default: 100.127.255.0/24
+    ###
+    network_cidr: "100.127.255.0/24"
+    ###
+    ### MAC address of the virtual router in the network. All hosts in this network will have
+    ### the same MAC vendor ID. Default: 80:e2:12:00:00:00
+    ###
+    mac: 80:e2:12:00:00:00
+    ###
+    ### User to create while nodes initialization. It will always work with ssh and terminal
+    ### access. The password for this user is the same. "root" user has the same password as
+    ### well, but without ssh enabled. Default: molecule
+    ###
+    ssh_user: &x_user "molecule"
+  ssh_connection_options:
+    - '-o UserKnownHostsFile=/dev/null'
+    - '-o StrictHostKeyChecking=no'
+platforms:
+  - &x_instance_example
+    ###
+    ### Name of the instance. It can be resolved within the network by "{{name}}.{{dns_suffix}}",
+    ### which is "example-1.molecule.local" for this configuration. Certainly, must be unique for
+    ### single molecule environment. Required field.
+    ###
+    name: control-plane-1
+    ###
+    ### Groups of the instance. Only affects how it's present in the inventory file. Default is
+    ### empty list.
+    ###
+    groups:
+      - control-plane
+    ###
+    ### OS flaivor. Consists of type and version in the following format: "{{type}}:{{version}}".
+    ### You must specify at least type, and if no version specified then it is "latest".
+    ### Possible values usually depend on the guest processor architecture. You can find the
+    ### pretty-full list of supported flavors and their versions in "files/flavors.yaml" (see
+    ### comments too!).
+    ### Quick list of some (not all) possible values (may be unavailable in certain arches):
+    ###   - ubuntu
+    ###   - ubuntu:latest
+    ###   - ubuntu:noble
+    ###   - ubuntu:24.04
+    ###   - ubuntu:24
+    ###   - ubuntu:bionic
+    ###   - debian
+    ###   - debian:buster
+    ###   - centos
+    ###   - centos:8.4
+    ###   - fedora
+    ###   - alpine
+    ### Required field.
+    ###
+    flavor: ubuntu
+    ###
+    ### Guest OS. Can partially change the configuration of VM. Default: follows flavor field.
+    ### Possible values:
+    ###   - linux
+    ###
+    # guest_os: unspecified
+    ###
+    ### Image URL. You can use a custom image, but you still must specify the "flavor" and/or
+    ### "guest_os" settings.
+    ### Examples:
+    ###   - https://example.tld/image.qcow2
+    ###   - ftp://1.1.1.1/image.qcow2
+    ###   - file:////media/usb-storage/windows.qcow2
+    ### Default: follows flavor field and downloads from pre-defined link.
+    ###
+    # image_url: unspecified
+    ###
+    ### IP address to use. You usually don't need to specify it manually. It will be
+    ### automatically detected from subnet. Default: some IP from the subnet.
+    ###
+    # ip: unspecified
+    ###
+    ### Guest VM architecture. You should expect pretty poor performance if host and guest
+    ### architectures mismatch. For now, only these architectures are supported:
+    ###   - arm64
+    ###   - amd64
+    ###   - native (same as host's)
+    ### Details:
+    ###   Both arm64 and amd64 have TPM and UEFI features.
+    ###   Only amd64 has secure boot and SMM enabled.
+    ### Default: "native"
+    ###
+    arch: native
+    ###
+    ### Disk size. Examples: "10G", "100G", "15555M". Default: "10G". This is a sparse disk,
+    ### thus only allocates really used space.
+    ###
+    disk_size: "10G"
+    ###
+    ### Memory size. Examples: "1G" (minimal), "2G", "16G", "120G". This is also allocated in
+    ### the sparse way, with memory balloon. It only allocates really used memory. Default: "2G".
+    ###
+    memory_size: "2G"
+    ###
+    ### Number of virtual CPUs. Default: "1". You can set "128", but it will not outperform your
+    ### native performance :)
+    ###
+    vcpu: "1"
+  - ###
+    ### Let's add more similar nodes, with name override
+    ###
+    <<: *x_instance_example
+    name: control-plane-2
+  - <<: *x_instance_example
+    name: control-plane-3
+  - ###
+    ### Minimal configuration with only required fields plus groups set
+    ###
+    name: worker-1
+    groups:
+      - node-pool-default
+      - workers
+    flavor: centos
+  - ###
+    ### You can simultaneously run VMs with different architecture. For this example let's
+    ### assume that the host arch is amd64, thus here we can set a different one.
+    ###
+    name: worker-2
+    groups:
+      - node-pool-slooooow
+      - workers
+    flavor: centos
+    arch: amd64
+provisioner:
+  name: ansible
+  log: true
+  ###
+  ### You can modify your inventory with some additional groups details or even
+  ### add some extra hosts.
+  ###
+  inventory:
+    group_vars:
+      control-plane:
+        labels:
+          node.circumspectlabs.ie/use-as-storage-keeper: true
+        taints:
+          - key: node-role.kubernetes.io/control-plane
+            effect: NoSchedule
+      workers: {}
+    host_vars:
+      control-plane-1:
+        smth: something-1
+      control-plane-2:
+        smth: something-2
+  env:
+    ANSIBLE_DUPLICATE_YAML_DICT_KEY: 'ignore'
+  playbooks:
+    converge: ../../playbook.yaml
+    verify: ../../tests.yaml
+  config_options:
+    defaults:
+      remote_user: *x_user
+      roles_path: ./roles
+      host_key_checking: False
+      pipelining: True
+    ssh_connection:
+      ssh_args: -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+verifier:
+  name: ansible
+scenario:
+  name: default

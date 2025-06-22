@@ -1,0 +1,163 @@
+# Reliability Concept
+
+This article explains the basic concepts of reliability of the components of 
+Kubernetes clusters and applications in there. It is a "must read" for junior
+platform engineers and other engineers who learn Kubernetes, and just a
+recommended topic for more mature engineers.
+
+---
+
+Every Kubernetes enjoyer knows and understands clearly: Kubernetes is the
+platform solution which provides reliability to the workloads in the cluster.
+Of course, everyone understands that it's not that simple because you still must
+configure your workloads properly. The most well-known practices are usage of
+multiple replicas, not running the workloads on a single node, having a few
+worker nodes, etc. And every practice has at least one strong reason to follow
+it. When you understand this reason, you can apply such practices mindfully
+and virtuously.
+
+The more complex part of the reliability question, is how to run the entire
+cluster in the highly-available mode. But firstly, let's dig deeper into how
+the reliability really works.
+
+## Stateless vs. Stateful
+
+There is a little chaos on these definitions.
+
+Stateless service is the type of service which has no "state". Stateful service
+is the type of service with a "state". And "state" here is a set of information
+necessary to execute the service's function.
+
+Every engineer knows it, but there are a couple of extra details:
+
+* Scope rule: the definition of stateless or stateful always has some scope
+* Feature rule: for different kinds of payloads, the same scoped service might
+be stateless or stateful (e.g. for different requests)
+* Condition rule: in some cases, the stateless feature may become stateful (e.g.
+in case of performance degradation)
+
+The example which sets things to the right places:
+
+The whole application has (1) a database and (2) a microservice with two replicas
+which are just an HTTP server.
+
+* **Scope rule:** the whole application is stateful, because it has a state in
+database, but the microservice is still stateless (usually). And if something in
+the scope is stateful, then the whole scope is stateful.
+* **Feature rule:** different features may work with state differently. For example,
+the business feature works with database (stateful in the whole system scope),
+but another feature is just `/ping` route to test availability of the application
+(stateless in any scope).
+* **Condition rule:** some functions may behave differently in specific conditions.
+For example, some stateless functions still may have "state" when the system is in
+degraded state. Practically, to simplify the development process, we assume that the
+system always work in "normal" conditions. However, SRE engineers should keep in
+mind that the application works different in non-normal conditions, thus stateless
+may become stateful.
+
+Always remember about scope and particular feature when you think about something
+is stateless or stateful. It works similar for any workload entity, whether it's a
+process, container, pod, or node.
+
+Of course, to simplify the communication between engineers, we prefer to shortly
+name things "stateless" instead of long detailed explanation. However, in complex
+systems, you should understand the conditions when it's stateless and when not.
+
+## Reliability of Stateless
+
+Stateless services have a really useful behavioral patterns: instances of the
+service can function without knowledge of each other. In theory, stateless
+services might be replicated almost as you want. The key word here is
+"almost", because there are known practical limitations:
+
+* Still, there is a state, but it's separated from the scope of the service.
+Thus, you must be sure that your replicas don't overload the state keeper (e.g.
+database)
+* Remember about pools. At least, your services may run out of some capacity
+like IP addresses or containers on nodes. More complex example: Kafka topics
+have a limited amount of partitions, and more consumers than count of
+partitions doesn't improve the performance (conditionally, even decrease).
+* More replicas doesn't always mean more reliability. Reliability is always
+attached to some point of failure. If it's a node, and you run all of your
+replicas on the same node, then it has the same level of reliability as for
+a single pod. Your replicas must be distributed by failure domains.
+* Reliability of some service might depend on the reliability of other
+service. For example, your service will respond with 500 error in case of
+failure of the database (if it is a direct dependency).
+* In case of dependency, your service and the dependency must be in the same
+failure domain. If not, then in case of failure of one of these domains, your
+application stops working properly.
+
+Another example: you have two nodes in different failure domains ("A" and
+"B"), and an extra node with database in "A" zone. In case of outage of zone
+A, your application goes down.
+
+Another example for cloud practitioners: if you have 3 availability zones and
+a subnet for every AZ, but your single NAT service is in single zone, then your
+entire VPC depends on single availability zone. For example, in AWS you cannot
+create NAT without AZ and usually engineers create NATs correspondingly to
+availability zones, but you can do it in Azure which misleads engineers to create
+only one NAT which under the hood depends on a single AZ.
+
+## Reliability of Stateful
+
+Stateful services are less convenient in terms of reliability. Independently of the
+type of state, there is the constant set of properties:
+
+* Only one node decides how to update the state. Usually this node is marked as
+leader or primary node. Sometimes it depends on the first node which received
+the request, but then it still must have someone specific to resolve conflicts
+between parallel requests
+* Some applications doesn't require sending requests to a leader node. In that case,
+they have a distribution layer which automatically forwards requests to the right
+node, depending on the payload. It still has a leader. Examples: etcd and zookeeper.
+Sometimes you can or even must implement it (i.e. postgres).
+* Your service always depends on the availability of leader/primary node. Thus,
+there is only one way to provide reliability here: member/secondary nodes must be
+able to decide who will become the next leader/primary one. Some systems can perform
+elections without extra actions (i.e. etcd), some require external software
+(i.e. postgres).
+* Similarly to stateless, more members/replicas doesn't always mean more reliable
+system. If you locate primary and replicas in the single failure domain, then it
+doesn't increase the reliability. In addition, stateful services usually spend
+resources to keep the state consistent between replicas.
+* Similarly to stateless, reliability of some services might depend on the
+reliability of other services. For example, your Kafka nodes usually depend on
+Zookeeper service (direct dependency).
+* Similarly to stateless, your service and the dependency must be in the same
+failure domain. If not, then in case of failure of one of these domains, your
+application stops working properly.
+
+Another example: your Kafka depends on Zookeeper, Kafka is in A-zone, Zookeeper
+is in B-zone. In case of outage of any zone, your application becomes unavailable.
+
+## Reliability of On-premise Cluster
+
+On-premise cluster is a complex system which consist of many services. The
+trivial Kubernetes cluster usually has the following services:
+
+* Etcd (statekeeper)
+* Control Plane
+* Container Runtime Interface (CRI)
+* Container Network Interface (CNI)
+* Container Storage Interface (CSI)
+
+This is not a full list, but the reliable design even of these systems is complex
+and requires the remarkable amount of efforts. Every system must be reliable across
+failure domains. If not, then the reliability of workloads doesn't matter - you
+still can lose the whole cluster in case of outage of single component or a failure
+domain.
+
+Sometimes it's more convenient to think about functions (features), than
+about components or services. If you design your cluster to be able to
+provide a specific feature (e.g. some specific CSI), you must ensure that
+all the necessary for this feature services (e.g. Ceph cluster) are reliable
+across the failure domains and available in case of failure of any failure
+domain.
+
+## Quick Summary
+
+This topic must clarify the basic concepts of reliability of stateless
+and stateful applications and their components. Now you can MINDFULLY
+decide about reliability of different components of any Kubernetes cluster,
+whatever managed by cloud or self-hosted one.

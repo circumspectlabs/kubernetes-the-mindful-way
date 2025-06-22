@@ -1,0 +1,10 @@
+- name: daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+  timeout: 15
+
+- name: containerd daemon-restart
+  ansible.builtin.systemd:
+    state: restarted
+    name: containerd.service
+  timeout: 15

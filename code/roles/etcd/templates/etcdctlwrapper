@@ -1,0 +1,13 @@
+#!/bin/bash
+
+__ARGS_PKI=(
+    "--cacert={{ etcd_conf_dir }}/pki/ca.crt"
+    "--cert={{ etcd_conf_dir }}/pki/client.crt"
+    "--key={{ etcd_conf_dir }}/pki/client.key"
+)
+__ARGS_ENDPOINTS=(
+    "--endpoints={{ play_hosts | map('extract', hostvars) | map(attribute='vlan_ip') | ansible.builtin.product([':2379']) | map('join') | list | join(',') }}"
+    "--dial-timeout=1s"
+)
+
+/usr/local/bin/etcdctl "${__ARGS_PKI[@]}" "${__ARGS_ENDPOINTS[@]}" "$@"

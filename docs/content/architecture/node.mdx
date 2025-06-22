@@ -1,0 +1,320 @@
+import { Callout } from 'nextra/components';
+import Image from 'next/image';
+
+# Node
+
+After the [Control Plane Design](/en/grand-design/control-plane) article,
+you already know that nodes are deeply integrated with the control planes.
+It's sequential to dig deepers into how Kubernetes nodes work.
+
+This is a must-read for everyone involved to cluster administration and
+maintenance, however still might be helpful for just users and developers,
+especially in terms of performance and troubleshooting.
+
+## Glossary
+
+**Control Plane Node** is a type of nodes which run some components of the
+control plane. Depending the way to run control plane services, you may
+see these components as a set of static pods. These pods usually tainted
+and labeled with the specific options which disallow to run workloads
+without explicit instruction to do it.
+
+**Worker Node** is a type of nodes which used for common workloads. They
+still can have extra labels and taints.
+
+**Node Pool** is a group of nodes with the similar configuration.
+
+**Container Runtime Interface** is the type of interfaces for configuring
+how exactly run the container on the node.
+
+**Container Network Interface** is the type of interfaces for configuring
+how exactly enable networking between containers, nodes, and other network
+scopes. This component is responsible for network adresses, network
+interfaces, routing, firewalls, etc.
+
+**Container Storage Interface** is the type of interfaces for configuring,
+management, and mounting volumes and filesystems.
+
+## Components
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/node.png" width={500} height={500}/>
+  <span style={{ marginTop: "0.3rem", width: 500, textAlign: "center", color: "gray" }}>Component diagram of the common Kubernetes node. The dash lines show the optional or depending on the implementation links.</span>
+</div>
+
+### Kubelet
+
+Kubelet is the main component of any Kubernetes node. It registers in the
+control plane, creates the Node object in API, and syncronizes the state
+of this object with the actual state of the node.
+
+In difference to the control plane components, kubelets (as well as
+Kubernetes proxy) are configured by both CLI arguments and the
+configuration file. See more details about the configuration here:
+[official documentation](https://kubernetes.io/docs/tasks/administer-cluster/kubelet-config-file/)
+and [config reference](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/).
+
+This component usually communicates with API via mutual TLS (with client
+key and certificate). However, it's possible to enable any other
+authentication via kubeconfig (defined in the kubelet settings). For
+example, you can use `OIDC` or `exec` types of authentication. You can
+also use `bootstraptoken` authentication, if it is enabled in the API
+and the controller manager.
+
+It's always useful to read the whole [configuration documentation](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1),
+but let's highlight the most important and practically used settings.
+
+#### Readiness
+
+It becomes more complex when something goes wrong with your node. We can
+explicitly configure this behaviour, readiness timeout, and other related
+counters.
+
+Every `nodeStatusUpdateFrequency` (diration: `10s`) the kubelet performs
+different checks of CPU, memory, IO stats, network, and other metrics,
+and reports to API of something has been changed. In addition, it also
+reports to API every `nodeStatusReportFrequency` (diration: `5m`) even
+if no changes happened.
+
+The more important question here is how API identifies that the node is
+not ready anymore. Every kubelet creates Lease object in `kube-node-lease`
+namespace with `nodeLeaseDurationSeconds` (int: 40) timeout. It also
+updates this Lease every `nodeStatusUpdateFrequency`. You can modify
+`nodeLeaseDurationSeconds` to make your cluster more or less responsive
+to disruptions, but usually it's not recommended to shorten it.
+
+Kubelet creates this Lease objects on registration, and API waits for
+the release of this lease. Taints, drains, or any other specific actions
+cannot make node unready (if it doesn't disrupt the node).
+
+#### Eviction
+
+Eviction is a specific process of kubelet which allows to keep node
+stable and performant. There are two types of eviction: `soft` and `hard`.
+Long story short, they evict pods from nodes at some specific conditions.
+You can manage the behavior of this process with config parameters. Read
+more about eviction in the [official documentation](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/).
+
+#### Registry Credentials
+
+Same as for well-known cloud-managed Kubernetes, you can enable automated
+authentication for container registries you like. This configuration can
+be done with the kubelet config's [CredentialProvider](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-CredentialProvider).
+
+#### Resource Management
+
+Finally, you can precisely configure node resources management, including
+the following features and flags:
+* Claim some resources for the system (everything what's not related
+to Kubernetes).
+* Claim some resources for the kubelet itself.
+* Specify thresholds for pressure condition.
+
+### Proxy
+
+Proxy is an extra but (usually) required component for Kubernetes nodes.
+By some historical artifacts in the documentation and references, it
+seems that this component used to be part of kubelet and was reasonably
+separated.
+
+This component is responsible for configuration of the node-internal NAT
+and some filter rules (not related to NetworkPolicies). It watches Service
+objects in API and correspondingly update the firewall rules and chains (in
+both `nat` and `mangle` tables). This component always relies upon `iptables`,
+and can work with both the legacy and nftable versions. Usually it
+automatically identifies the type of iptables, but sometimes it's still
+necessary to define it (e.g. if you run Kubernetes node in a container
+environment).
+
+Unexpectedly, this component only communicates with API (of the control
+plane), it doesn't request to kubelet port and has it's own kubeconfig.
+
+It's not preferable to significantly change the configuration of this
+component from default setting, because it may change the behavior of
+CNI.
+
+For some cases, it's worth to replace this component in favor to the
+solution provided by CNI. The typical example is Cilium CNI, which can
+use eBPF programs for orchestrating traffic. At some point of scale,
+eBPF-based proxy become even more performant than nftables.
+
+### Containers Controller (OCI)
+
+This is a service which allows running OCI interface (socket) and perform
+the corresponding actions with CRI binary. Practically, it's usually
+`containerd` which configured to run `runc` (CRI). You can also use
+`docker` (deeply deprecated!) and `cri-o` services, the corresponding
+configuration is in kubelet config file (see `containerRuntimeEndpoint`
+option).
+
+It is very recommended to run `containerd`. It is the most popular and
+the most stable container manager, and also can run numerous types of
+CRI (see below), even simultaneously different CRIs.
+
+### Container Runtime (CRI)
+
+Container Runtime Interface is practically a binary which allows running
+another binary in the specifically configured container. CRI enables an
+abstraction layer between host operating system and container's
+operating system.
+
+The most popular and default implementation is [runc](https://github.com/opencontainers/runc).
+Other implementations are also worth to consider:
+
+* [crun](https://github.com/containers/crun) - less memory footprint,
+100% compatible with CRI standard. The best for embedded devices and
+memory-tight nodes (i.e. nodes on Raspberry Pi).
+
+* [nvidia](https://developer.nvidia.com/container-runtime) - proprietary
+CRI aware of Nvidia GPUs. It allows using a single GPU with multiple
+containers (which is useful for neural engines, learning, and everything
+related to AI). Works with containerd and cri-o.
+
+* [kata](https://github.com/kata-containers/kata-containers) - a CRI
+which allows running applications with the specific Linux kernel. It is
+similar to (para)virtualization, but with faster maintenance.
+
+* [firecracker](https://github.com/firecracker-microvm/firecracker-containerd) -
+a pretty new CRI which is positioned as micro VM. It provides the
+additional level of isolation because relies upon KVM and virtualization
+instructions.
+
+There are no specific recommendations how to pick the right CRI, rely only
+on the necessary features and the most popular solutions (because they have
+more support and get security patches faster).
+
+More details about the protocol are available in [CRI Protocol](https://github.com/kubernetes/cri-api).
+
+### Networking (CNI)
+
+Container Network Interface is a set of binaries and configs your cluster
+uses for establishing connections between nodes and containers. Within
+single node, your CRI can enable the proper communications, but networking
+between nodes is a way more complex and requires flexible configuration,
+thus it has been delegated to pluggable component at your choice.
+
+One of the most popular open source CNI is [calico](https://github.com/projectcalico/calico),
+because it supports NetworkPolicies, cross-node traffic encryption, and
+dynamic IP pools configuration. A few other implementations are also worth
+to review:
+
+* [flannel](https://github.com/flannel-io/flannel) - supports only the
+basic CNI features. It's the simplest CNI ever, even without firewall rules
+support. Practically, it's the fastest one.
+
+* [kuberouter](https://github.com/cloudnativelabs/kube-router) - very
+simple but powerful CNI implementation. Enables firewall features, runs
+headless (with no extra pods except DaemonSet).
+
+* [cilium](https://github.com/cilium/cilium) - CNI which heavily relies
+upon eBPF technology. Supports NetworkPolicies, cross-node traffic
+encryption, and has a really diverse set of features s.a. observability
+(prometheus metrics) and even has own replacement for Kubernetes proxy
+component (which allegedly has higher performance than native).
+
+A quick list of recommendations:
+
+* Practically, for the proper security, you have to enable NetworkPolicies
+feature. Even if you don't use it right now.
+
+* Encryption of the whole traffic is a very consuming feature, but depends
+on the amount of traffic. It's worthful for zero-trust environments, but
+most of all cases, you must enable transit encryption only at the pods
+level.
+
+* Choose by features, then by benchmarks, then pick the most popular
+solution.
+
+Check out the [CNI benchmarks](https://itnext.io/benchmark-results-of-kubernetes-network-plugins-cni-over-40gbit-s-network-2024-156f085a5e4e)
+for different implementations, but don't forget about features.
+
+More details about CNI are available in [CNI Specification](https://github.com/containernetworking/cni/blob/main/SPEC.md).
+
+### Persistent Storage (CSI)
+
+Container Storage Interface is practically a set of binaries, kernel
+modules, and configurations, which allows mounting volumes from the
+configured storage provider. CSI is a universal interface to the manifold
+of storage types, including block storages, filesystems, and fuse-backed
+solutions.
+
+Historically, kubelets are able to mount some types of volumes even
+without any CSI. For example, there are the embedded functionality for
+handling just local bind mounts, NFS, iSCSI, Fiber Channel, even
+proprietary AWS and Azure block storages. The full list of supported
+volumes is available in [Kubernetes API Reference | Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core).
+
+CSI expands the list of supported volumes. For example, there are
+[officially supported CSI](https://github.com/orgs/kubernetes-sigs/repositories?language=&q=csi&sort=&type=all)
+drivers. Moreover, because of flexibility of CSI implementation, cloud
+vendors prefer to use CSI-based mounts instead of kubelet-native mounts.
+For example, Azure prefer to install two DaemonSets (CSI controllers)
+and avoids using native volume mount feature.
+
+A few recommendations:
+
+* Prefer to use the most popular and well-supported network storage
+systems. Storage is only thing that must sustain after even the worst
+reliability or security issue.
+
+* If possible, use application-based replication (PostgreSQL
+primary-standby, OpenSearch standby shards, ClickHouse ReplicatedMergeTree,
+etc.), instead of volume-based.
+
+* Choose the storage systems you already have or already know how to
+maintain. For example, Ceph is definitely not for beginners, however
+it's very good choice. Or if you run your cluster in OpenStack, then most
+likely you already have Cinder.
+
+In terms of design, this is usually the most complex choice. There are
+no universal solutions.
+
+More details are available in [CSI Specification](https://github.com/container-storage-interface/spec).
+
+## Node Pools
+
+Closer to practice, you also should know the term "node pool". This is
+a group of nodes sharing the same configuration and environment. When
+you run your pods in single node pool, you always sure that they are
+running in the similar environment, such as the similar hardware specs,
+same CNI, same set of CSI drivers, same kubelet settings, etc.
+
+This approach to running Kubernetes nodes simplifies the cluster
+management. Practically, it's very convenient and simple to use,
+distributing workloads by node pools depending on their properties.
+The example of the typical cluster with multiple node pools:
+
+* **default**. It usually has no taints, and runs just common pods
+without specific requirements.
+
+* **control-plane**. A node pool for control plane components and maybe
+some critical in-cluster components (like CNI/CSI controllers, security
+providers, etc).
+
+* **unstable**. Everyone knows that sometimes applications may leak, or
+stuck in infinite loop, or even exterminate the whole node it's running
+on. But, because of it's pattern, they tolerate periodic restarts, don't
+have to be always online, etc. In that case, you can postpone the
+remediation of such bugs (or give some time for developers) by
+segregating these workloads to this node pool.
+
+* **confidential**. This is for a specific type of workloads, i.e. for
+[HashiCorp Vault](https://github.com/hashicorp/vault) deployment with
+HSM/TPM and specific OS settings. Or just for the specific workloads with
+strong security requirements.
+
+* **gpu**, **hpc**, etc. The node pool with the specific hardware equipment,
+configuration, or amount of available resources. I.e. you can sit your
+[Jenkins](https://www.jenkins.io/doc/book/using/using-agents/) agents and
+[Dask](https://docs.dask.org/en/stable/) cluster members here.
+
+* Sometimes it's worth to separate **storage** node pool, for containerized
+deployment of your storage provider. However, it's recommended to run
+these specific services separately from the application workload's cluster,
+making the Kubernetes cluster just a consumer of this service.
+
+## Quick Summary
+
+The second complex part is behind! Now you can mindfully design how exactly
+you should run your workloads in on-premise clusters, including the mindful
+choice of all Kubernetes node components.

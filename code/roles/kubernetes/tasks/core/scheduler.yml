@@ -1,0 +1,108 @@
+- name: Create Kubernetes Scheduler key
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+    owner: "root"
+    group: "control-plane"
+    mode: '0640'
+  loop:
+    - scheduler.key        # User: system:kube-scheduler
+    - scheduler-server.key # Server: scheduler
+
+- name: API Scheduler Server
+  block:
+    - name: Create Kubernetes Scheduler server certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/scheduler-server.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/scheduler-server.key"
+        common_name: scheduler
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - serverAuth
+        subject_alt_name:
+          - IP:127.0.0.1
+          - IP:{{ vlan_ip }}
+          - DNS:localhost
+          - DNS:scheduler
+        owner: "root"
+        group: "root"
+        mode: '0600'
+
+    - name: Create Kubernetes Scheduler server certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/scheduler-server.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/scheduler-server.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: "root"
+        group: "control-plane"
+        mode: '0640'
+      notify:
+        - kubernetes scheduler daemon-restart
+
+- name: API Scheduler Client
+  block:
+    - name: Create Kubernetes Scheduler certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/scheduler.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/scheduler.key"
+        common_name: system:kube-scheduler
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: "root"
+        group: "root"
+        mode: '0600'
+
+    - name: Create Kubernetes Scheduler certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/scheduler.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/scheduler.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: "root"
+        group: "control-plane"
+        mode: '0640'
+      notify:
+        - kubernetes scheduler daemon-restart
+
+    - name: Configure Kubernetes Config for "scheduler"
+      ansible.builtin.template:
+        src: kubeconfig/system.j2
+        dest: "{{ kubernetes_conf_dir }}/config/scheduler"
+        owner: "root"
+        group: "control-plane"
+        mode: '0640'
+      vars:
+        server: "https://127.0.0.1:6443"
+        certificate_authority: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        client_certificate: "{{ kubernetes_conf_dir }}/pki/scheduler.crt"
+        client_key: "{{ kubernetes_conf_dir }}/pki/scheduler.key"
+      notify:
+        - kubernetes scheduler daemon-restart
+
+- name: Configure Kubernetes Scheduler service systemd unit
+  ansible.builtin.template:
+    src: core/kubernetes-scheduler.service.j2
+    dest: /etc/systemd/system/kubernetes-scheduler.service
+    owner: "root"
+    group: "root"
+    mode: '0644'
+  notify:
+    - daemon-reload
+    - kubernetes scheduler daemon-restart
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable Kubernetes Scheduler service
+  ansible.builtin.systemd:
+    name: kubernetes-scheduler.service
+    state: started
+    enabled: true

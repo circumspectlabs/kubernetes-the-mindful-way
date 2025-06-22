@@ -1,0 +1,87 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: default
+  options:
+    managed: True
+  settings:
+    timeout: 180
+    dns_suffix: "molecule.local"
+    network_cidr: "100.127.255.0/24"
+    ssh_user: "molecule"
+  ssh_connection_options:
+    - '-o UserKnownHostsFile=/dev/null'
+    - '-o StrictHostKeyChecking=no'
+platforms:
+  - name: control-plane-1
+    groups:
+      - control-plane
+    flavor: ubuntu
+    disk_size: "20G"
+    memory_size: "4G"
+    vcpu: "2"
+  - name: control-plane-2
+    groups:
+      - control-plane
+    flavor: centos
+    disk_size: "20G"
+    memory_size: "4G"
+    vcpu: "2"
+  - name: control-plane-3
+    groups:
+      - control-plane
+    flavor: ubuntu
+    disk_size: "20G"
+    memory_size: "4G"
+    vcpu: "2"
+  # - name: worker-1
+  #   groups:
+  #     - worker
+  #   flavor: ubuntu
+  #   disk_size: "20G"
+  #   memory_size: "4G"
+  #   vcpu: "2"
+  # - name: worker-2
+  #   groups:
+  #     - worker
+  #   flavor: centos
+  #   disk_size: "20G"
+  #   memory_size: "4G"
+  #   vcpu: "2"
+provisioner:
+  name: ansible
+  log: true
+  ###
+  ### You can add extra variables particularly for groups and hosts
+  ###
+  inventory:
+    group_vars:
+      all:
+        vrrp_ip: 100.127.255.210
+      control-plane:
+        labels:
+          node.circumspectlabs.ie/use-as-storage-keeper: true
+        taints:
+          - key: node-role.kubernetes.io/control-plane
+            effect: NoSchedule
+      worker: {}
+  env:
+    ANSIBLE_DUPLICATE_YAML_DICT_KEY: 'ignore'
+    ANSIBLE_FORCE_COLOR: '1'
+    ANSIBLE_ROLES_PATH: ./roles:./../roles:./../../roles
+    OBJC_DISABLE_INITIALIZE_FORK_SAFETY: "YES"
+  playbooks:
+    converge: ../../main.yaml
+    verify: ../../tests.yaml
+  config_options:
+    defaults:
+      remote_user: molecule
+      host_key_checking: False
+      pipelining: True
+    ssh_connection:
+      ssh_args: -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+verifier:
+  name: ansible
+scenario:
+  name: default

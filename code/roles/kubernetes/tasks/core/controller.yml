@@ -1,0 +1,108 @@
+- name: Create Kubernetes Controller Manager keys
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+    owner: "root"
+    group: "control-plane"
+    mode: '0640'
+  loop:
+    - controller-manager.key        # User: system:kube-controller-manager
+    - controller-manager-server.key # Server: controller-manager
+
+- name: API Controller Manager Server
+  block:
+    - name: Create Kubernetes Controller Manager server certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/controller-manager-server.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/controller-manager-server.key"
+        common_name: controller-manager
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - serverAuth
+        subject_alt_name:
+          - IP:127.0.0.1
+          - IP:{{ vlan_ip }}
+          - DNS:localhost
+          - DNS:controller-manager
+        owner: "root"
+        group: "root"
+        mode: '0600'
+
+    - name: Create Kubernetes Controller Manager server certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/controller-manager-server.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/controller-manager-server.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: "root"
+        group: "control-plane"
+        mode: '0640'
+      notify:
+        - kubernetes controller-manager daemon-restart
+
+- name: API Controller Manager Client
+  block:
+    - name: Create Kubernetes Controller Manager certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/controller-manager.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/controller-manager.key"
+        common_name: system:kube-controller-manager
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: "root"
+        group: "root"
+        mode: '0600'
+
+    - name: Create Kubernetes Controller Manager client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/controller-manager.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/controller-manager.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: "root"
+        group: "control-plane"
+        mode: '0640'
+      notify:
+        - kubernetes controller-manager daemon-restart
+
+    - name: Configure Kubernetes Config for "controller-manager"
+      ansible.builtin.template:
+        src: kubeconfig/system.j2
+        dest: "{{ kubernetes_conf_dir }}/config/controller-manager"
+        owner: "root"
+        group: "control-plane"
+        mode: '0640'
+      vars:
+        server: "https://127.0.0.1:6443"
+        certificate_authority: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        client_certificate: "{{ kubernetes_conf_dir }}/pki/controller-manager.crt"
+        client_key: "{{ kubernetes_conf_dir }}/pki/controller-manager.key"
+      notify:
+        - kubernetes controller-manager daemon-restart
+
+- name: Configure Kubernetes Controller Manager service systemd unit
+  ansible.builtin.template:
+    src: core/kubernetes-controller-manager.service.j2
+    dest: /etc/systemd/system/kubernetes-controller-manager.service
+    owner: "root"
+    group: "root"
+    mode: '0644'
+  notify:
+    - daemon-reload
+    - kubernetes controller-manager daemon-restart
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable Kubernetes Controller Manager service
+  ansible.builtin.systemd:
+    name: kubernetes-controller-manager.service
+    state: started
+    enabled: true

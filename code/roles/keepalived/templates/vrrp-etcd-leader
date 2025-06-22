@@ -1,0 +1,4 @@
+#!/bin/bash
+if [[ "$(etcdctlwrapper --command-timeout=3s endpoint status | grep '{{ vlan_ip }}' | cut -d ',' -f 5 | xargs -L1 echo)" != "true" ]]; then
+    exit 1
+fi

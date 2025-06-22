@@ -1,0 +1,60 @@
+[Unit]
+After=network.target
+
+[Service]
+Type=notify
+User=etcd
+Group=etcd
+ExecStart=/usr/local/bin/etcd \
+  --name {{ inventory_hostname | hash('md5') }} \
+  --cert-file={{ etcd_conf_dir }}/pki/server.crt \
+  --key-file={{ etcd_conf_dir }}/pki/server.key \
+  --peer-cert-file={{ etcd_conf_dir }}/pki/peer.crt \
+  --peer-key-file={{ etcd_conf_dir }}/pki/peer.key \
+  --trusted-ca-file={{ etcd_conf_dir }}/pki/ca.crt \
+  --peer-trusted-ca-file={{ etcd_conf_dir }}/pki/peer/ca.crt \
+  --client-cert-file={{ etcd_conf_dir }}/pki/client.crt \
+  --client-key-file={{ etcd_conf_dir }}/pki/client.key \
+  --peer-client-cert-auth \
+  --client-cert-auth \
+  --snapshot-count=10000 \
+  --listen-peer-urls=https://{{ vlan_ip }}:2380,https://127.0.0.1:2380 \
+  --listen-client-urls=https://0.0.0.0:2379 \
+  --advertise-client-urls=https://{{ vlan_ip }}:2379 \
+  --initial-advertise-peer-urls=https://{{ vlan_ip }}:2380 \
+  --initial-cluster-token={{ etcd_cluster_name }} \
+  --initial-cluster={{ play_hosts | map('hash', 'md5') | ansible.builtin.product(['=https://']) | map('join') | list | ansible.builtin.zip(play_hosts | map('extract', hostvars) | map(attribute='vlan_ip')) | map('join') | list | ansible.builtin.product([':2380']) | map('join') | list | join(',') }} \
+  --initial-cluster-state=new \
+  --listen-metrics-urls=http://{{ vlan_ip }}:2381,http://127.0.0.1:2381 \
+  --data-dir={{ etcd_data_dir }}
+Restart=on-failure
+RestartSec=5
+OOMScoreAdjust=-950
+
+# sandboxing
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=noaccess
+ProcSubset=pid
+ProtectControlGroups=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+NoNewPrivileges=yes
+RemoveIPC=yes
+RestrictNamespaces=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+ReadWritePaths={{ etcd_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

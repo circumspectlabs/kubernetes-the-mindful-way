@@ -1,0 +1,46 @@
+- name: Add nvidia container toolkit signatures (debian)
+  ansible.builtin.apt_key:
+    url: https://nvidia.github.io/libnvidia-container/gpgkey
+    keyring: /etc/apt/trusted.gpg.d/nvidia-container-toolkit.gpg
+  when: ansible_os_family|lower == 'debian'
+
+- name: Add nvidia container toolkit repository (debian)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/trusted.gpg.d/nvidia-container-toolkit.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/{{ machine_arch_map[ansible_architecture] }} /"
+    filename: nvidia-container-toolkit
+    state: present
+  when: ansible_os_family|lower == 'debian'
+
+- name: Install nvidia container toolkit (debian)
+  ansible.builtin.apt:
+    name:
+      - nvidia-container-toolkit
+  when: ansible_os_family|lower == 'debian'
+
+- name: Add nvidia container toolkit repository (redhat)
+  ansible.builtin.yum_repository:
+    name: nvidia-container-toolkit
+    description: nvidia-container-toolkit
+    baseurl: https://nvidia.github.io/libnvidia-container/stable/rpm/$basearch
+    gpgkey: https://nvidia.github.io/libnvidia-container/gpgkey
+    repo_gpgcheck: true
+    gpgcheck: false
+    sslverify: true
+    sslcacert: /etc/pki/tls/certs/ca-bundle.crt
+  when: ansible_os_family|lower == 'redhat'
+
+- name: Install nvidia container toolkit (redhat)
+  ansible.builtin.dnf:
+    name:
+      - nvidia-container-toolkit
+  when: ansible_os_family|lower == 'redhat'
+
+- name: Get nvidia container toolkit variables
+  ansible.builtin.shell:
+    cmd: |-
+      which nvidia-container-runtime
+  changed_when: false
+  register: nvidia_toolkit_shell
+
+- ansible.builtin.set_fact:
+    binary_nvidia_runc: "{{ nvidia_toolkit_shell.stdout_lines[0] | default('/usr/bin/nvidia-container-runtime') }}"

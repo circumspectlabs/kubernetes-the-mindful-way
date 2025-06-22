@@ -1,0 +1,107 @@
+---
+- name: Create
+  hosts: localhost
+  gather_facts: false
+  no_log: "{{ molecule_no_log }}"
+  vars:
+    molecule_timeout: "{{ molecule_yml.driver.settings.timeout | default(300) }}"
+    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_NAME') }}"
+    user_home_directory: "{{ lookup('env', 'HOME') }}"
+    libvirt_default_image_path: "{{ user_home_directory }}/.cache/molecule/libvirt-images"
+    molecule_network_directory: "{{ molecule_ephemeral_directory }}/network"
+  tasks:
+    - ansible.builtin.set_fact:
+        libvirt_uri: "{{ lookup('ansible.builtin.pipe', 'virsh uri') }}"
+        gvswitch_qemu_listen:
+          address: "127.0.0.1"
+          port: "{{ 58000 + (((molecule_ephemeral_directory | md5 | batch(8)).0 | join | int(base=16)) % 1000) }}"
+
+    - name: Compute instances settings
+      ansible.builtin.debug:
+        msg: "ok"
+      changed_when: false
+      loop: &x_instances_loop "{{ molecule_yml.platforms }}"
+      loop_control: &x_instances_loop_control
+        label: "{{ item.name }}"
+        extended: true
+      vars: &x_instances_vars
+        item_index: "{{ ansible_loop.index }}"
+        item_name: "{{ item.name | mandatory('You must specify unique name of instance.') }}"
+
+    - name: Check instances status
+      community.libvirt.virt:
+        command: info
+        uri: "{{ libvirt_uri }}"
+      register: libvirt_info_terminate
+
+    - name: Terminate instances
+      community.libvirt.virt:
+        name: "{{ item_name }}"
+        state: destroyed
+        uri: "{{ libvirt_uri }}"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+      when: '(item_name in libvirt_info_terminate) and (libvirt_info_terminate[item_name].state == "running")'
+
+    - name: Wait for instance terminated
+      community.libvirt.virt:
+        command: info
+        uri: "{{ libvirt_uri }}"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+      until: '(result | dict2items | selectattr("key", "equalto", item_name) | map(attribute="value") | map(attribute="state")).0 == "shutdown"'
+      when: '(item_name in libvirt_info_terminate) and (libvirt_info_terminate[item_name].state == "running")'
+      register: result
+      retries: "{{ molecule_timeout }}"
+      delay: 1
+
+    - name: Check instances status
+      community.libvirt.virt:
+        command: info
+        uri: "{{ libvirt_uri }}"
+      register: libvirt_info_undefine
+
+    - name: Undefine instances
+      community.libvirt.virt:
+        name: "{{ item_name }}"
+        command: "undefine"
+        uri: "{{ libvirt_uri }}"
+        force: true
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+      when: '(item_name in libvirt_info_undefine) and (libvirt_info_undefine[item_name].state == "shutdown")'
+
+    - name: Stop gvswitch network
+      ansible.builtin.command:
+        argv:
+          - /bin/bash
+          - -c
+          - |-
+            if cat "{{ molecule_network_directory }}/gvswitch.pid" &> /dev/null && ps -p "$(cat "{{ molecule_network_directory }}/gvswitch.pid")" &>/dev/null; then
+              GVSWITCH_PID="$(cat "{{ molecule_network_directory }}/gvswitch.pid")"
+              GVSWITCH_KILLED=false
+              for i in {1..18}; do
+                if ! kill -0 "${GVSWITCH_PID}" &> /dev/null; then
+                  GVSWITCH_KILLED=true
+                  break
+                fi
+                sleep 0.2
+              done
+              if [[ "${GVSWITCH_KILLED}" != "true" ]]; then
+                kill -9 "${GVSWITCH_PID}"
+              fi
+              echo "STOPPED"
+            fi
+      changed_when: '"STOPPED" in stop_network_command.stdout_lines'
+      register: stop_network_command
+
+    - name: Forcibly remove drive image (because too bulky)
+      ansible.builtin.file:
+        path: "{{ molecule_ephemeral_directory }}/{{ item_name }}/root.qcow2"
+        state: absent
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars

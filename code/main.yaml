@@ -1,0 +1,16 @@
+###
+### The one playbook to rule them all. Just applies other
+### playbooks in the right order.
+###
+---
+- name: Prepare to Ansible actions
+  ansible.builtin.import_playbook: playbooks/ansible.yaml
+
+- name: Enforce policies
+  ansible.builtin.import_playbook: playbooks/policies.yaml
+
+- name: Configure control plane nodes
+  ansible.builtin.import_playbook: playbooks/control-plane.yaml
+
+- name: Configure worker nodes
+  ansible.builtin.import_playbook: playbooks/workers.yaml

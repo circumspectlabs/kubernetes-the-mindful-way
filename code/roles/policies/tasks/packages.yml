@@ -1,0 +1,170 @@
+- name: Install essential packages (debian-based)
+  ansible.builtin.apt:
+    name:
+      # Apt
+      - apt-transport-https
+      - gnupg
+      # Editors
+      - nano
+      - bash
+      - bash-completion
+      - jq
+      - gawk
+      - sed
+      # Langs
+      - git
+      - python3
+      - python3-apt
+      - python3-certifi
+      - python3-iniparse
+      - python3-pip
+      - python3-requests
+      - python3-setuptools
+      - python3-tqdm
+      - python3-venv
+      - python3-wheel
+      - python3-yaml
+      # System
+      - openssl
+      - openssh-client
+      - openssh-server
+      - wget
+      - curl
+      - ca-certificates
+      # Archivers
+      - zip
+      - unzip
+      - gzip
+      - xz-utils
+      - zstd
+      # Networking
+      - iptables
+      - iproute2
+      - net-tools
+      - dnsutils
+      - nmap
+      # Hardware
+      - htop
+      - iftop
+      - iotop
+      - ethtool
+      # Other
+      - pv
+      - inotify-tools
+      - bsdmainutils
+      - groff
+      - less
+      - file
+  become: true
+  when: ansible_os_family|lower == 'debian'
+  retries: 3
+  delay: 1
+
+- name: Install EPEL package source (redhat-based)
+  ansible.builtin.dnf:
+    name:
+      - epel-release
+  become: true
+  when: ansible_os_family|lower == 'redhat'
+  retries: 3
+  delay: 1
+
+- name: Install essential packages (redhat-based)
+  ansible.builtin.dnf:
+    name:
+      # Editors
+      - nano
+      - bash
+      - bash-completion
+      - jq
+      - gawk
+      - sed
+      # Langs
+      - git
+      - python3
+      - python3-dnf
+      - python3-certifi
+      - python3-iniparse
+      - python3-pip
+      - python3-pip-wheel
+      - python3-requests
+      - python3-setuptools
+      - python3-tqdm
+      - python3-yaml
+      # System
+      - openssl
+      - openssh
+      - openssh-server
+      - wget
+      - curl
+      - ca-certificates
+      # Archivers
+      - zip
+      - unzip
+      - gzip
+      - xz
+      - zstd
+      # Networking
+      - iptables
+      - iproute
+      - net-tools
+      - dnsutils
+      - nmap
+      # Hardware
+      - htop
+      - iftop
+      - iotop
+      - ethtool
+      # Other
+      - pv
+      - inotify-tools
+      - groff
+      - less
+      - file
+  become: true
+  when: ansible_os_family|lower == 'redhat'
+  retries: 3
+  delay: 1
+
+- name: Set default settings for console user interface
+  ansible.builtin.copy:
+    src: "skel/{{ item }}"
+    dest: "/etc/skel/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  changed_when: false
+  loop:
+    - .bashrc
+    - .bash_logout
+    - .profile
+  become: true
+
+- name: Enable new configuration to the current user
+  ansible.builtin.copy:
+    dest: "{{ ansible_user_dir }}/{{ item }}"
+    src: "/etc/skel/{{ item }}"
+    remote_src: yes
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: '0600'
+  changed_when: false
+  loop:
+    - .bashrc
+    - .bash_logout
+    - .profile
+
+- name: Enable new configuration to the root user
+  ansible.builtin.copy:
+    dest: "/root/{{ item }}"
+    src: "/etc/skel/{{ item }}"
+    remote_src: yes
+    owner: "root"
+    group: "root"
+    mode: '0600'
+  changed_when: false
+  loop:
+    - .bashrc
+    - .bash_logout
+    - .profile
+  become: true

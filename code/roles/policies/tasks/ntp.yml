@@ -1,0 +1,33 @@
+- name: Install simple NTP client (debian)
+  ansible.builtin.apt:
+    name:
+      - systemd-timesyncd
+  when: ansible_os_family|lower == 'debian'
+  become: true
+
+- name: Install simple NTP client (redhat)
+  ansible.builtin.dnf:
+    name:
+      - systemd-timesyncd
+  when: ansible_os_family|lower == 'redhat'
+  become: true
+
+- name: Configure NTP client
+  ansible.builtin.copy:
+    src: "timesyncd.conf"
+    dest: "/etc/systemd/timesyncd.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload services
+    - restart timesyncd
+  become: true
+
+- name: Enable service
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd.service
+    enabled: true
+  become: true
+
+- ansible.builtin.meta: flush_handlers

@@ -1,0 +1,41 @@
+#cloud-config
+{% set shell = (item_extra_settings.shell | default('/bin/bash')) %}
+{% set packages = (item_extra_settings.init_packages | default([])) %}
+{% set commands = (item_extra_settings.init_commands | default([])) %}
+
+###
+### Documentation: https://cloudinit.readthedocs.io/en/latest/reference/examples.html
+###
+
+preserve_hostname: False
+hostname: {{ item.name }}
+fqdn: {{ item.name }}.{{ molecule_dns_suffix }}
+
+# Setup users with ssh keys so molecule can log in into new machine
+users:
+  - default
+  - name: "root"
+    shell: "{{ shell }}"
+    lock_passwd: False
+    plain_text_passwd: "{{ molecule_ssh_user }}"
+  - name: "{{ molecule_ssh_user }}"
+    groups: ['sudo', 'admin', 'wheel']
+    shell: "{{ shell }}"
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: False
+    plain_text_passwd: "{{ molecule_ssh_user }}"
+    ssh_authorized_keys:
+      - {{ ssh_key.public_key }}
+
+{% if packages %}
+packages: {{ packages | to_json }}
+{% endif %}
+
+{% if commands %}
+runcmd: {{ commands | to_json }}
+{% endif %}
+
+output:
+  all: ">> /var/log/cloud-init.log"
+
+timezone: {{ item.timezone | default('Etc/UTC') }}

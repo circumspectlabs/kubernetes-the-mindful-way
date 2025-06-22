@@ -1,0 +1,16 @@
+[Unit]
+After=kubernetes-api.service kubernetes-controller-manager.service kubernetes-scheduler.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kube-proxy \
+    --kubeconfig={{ kubernetes_conf_dir }}/config/proxy \
+    --config={{ proxy_conf_dir }}/kube-proxy-config.yaml \
+    --hostname-override={{ inventory_hostname }}
+Restart=on-failure
+StartLimitInterval=0
+RestartSec=10
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,124 @@
+- name: Detect keepalived interface name
+  ansible.builtin.set_fact:
+    keepalived_interface: |-
+      {% macro get_interfaces_with_suitable_network_address(addr) -%}
+      {% for interface in ansible_interfaces %}
+      {% set interface_facts = hostvars[ansible_hostname]['ansible_' + interface] %}
+      {% if (interface_facts['ipv4']['address'] is defined ) %}
+      {% set address = interface_facts['ipv4']['address'] | string %}
+      {% set prefix = interface_facts['ipv4']['prefix'] | string %}
+      {% if (address != "") and (prefix != "") and (prefix != "32") %}
+      {% set network_address = [address, prefix] | join('/') | ansible.utils.ipaddr(0) %}
+      {% if (addr is ansible.utils.in_network network_address) %}
+        {{ interface }}
+      {% endif %}
+      {% endif %}
+      {% endif %}
+      {% endfor %}
+      {%- endmacro %}
+      {{ (get_interfaces_with_suitable_network_address(vrrp_ip) | string).splitlines() | first | trim(' ') }}
+  when: 'keepalived_interface == "detect"'
+
+- name: Detect keepalived network address
+  ansible.builtin.set_fact:
+    keepalived_network_cidr: |-
+      {% set interface_facts = hostvars[ansible_hostname]['ansible_' + keepalived_interface] %}
+      {% set address = interface_facts['ipv4']['address'] | string %}
+      {% set prefix = interface_facts['ipv4']['prefix'] | string %}
+      {{ [address, prefix] | join('/') | ansible.utils.ipaddr(0) }}
+  when: 'keepalived_network_cidr == "detect"'
+
+- name: Detect keepalived unicast variables
+  ansible.builtin.set_fact:
+    keepalived_unicast_source_address: "{{ hostvars[ansible_hostname]['ansible_' + keepalived_interface]['ipv4']['address'] | string }}"
+    keepalived_unicast_peer_addresses: |-
+      {% set self_peer = hostvars[ansible_hostname]['ansible_' + keepalived_interface]['ipv4']['address'] | string %}
+      {% macro get_unicast_peer_addresses() -%}
+      {% for host in play_hosts %}
+      {% set interface_facts = hostvars[host]['ansible_' + hostvars[host]['keepalived_interface']] %}
+        {{ interface_facts['ipv4']['address'] }}
+      {% endfor %}
+      {%- endmacro %}
+      {{ (get_unicast_peer_addresses() | string).splitlines() | map('trim', ' ') | reject('equalto', self_peer) }}
+  when: 'not keepalived_multicast_available'
+
+- name: Install keepalived packages (debian)
+  ansible.builtin.apt:
+    name:
+      - keepalived
+  when: ansible_os_family|lower == 'debian'
+
+- name: Install keepalived packages (redhat)
+  ansible.builtin.dnf:
+    name:
+      - keepalived
+  when: ansible_os_family|lower == 'redhat'
+
+- name: Ensure keepalived directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop:
+    - "{{ keepalived_conf_dir }}"
+
+- name: Slurp keepalived password
+  ansible.builtin.slurp:
+    src: "{{ keepalived_conf_dir }}/password"
+  register: keepalived_slurp
+  run_once: true
+  failed_when: false
+
+- name: Set fact with keepalived password
+  ansible.builtin.set_fact:
+    keepalived_password: "{{ hostvars[play_hosts[0]].keepalived_slurp.content | b64decode }}"
+  run_once: true
+  when: keepalived_slurp.content is defined
+
+- name: Generate keepalived password
+  ansible.builtin.set_fact:
+    keepalived_password: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=30) }}"
+  run_once: true
+  changed_when: true
+  when: keepalived_slurp.content is not defined
+
+- name: Propogate keepalived password
+  ansible.builtin.set_fact:
+    keepalived_password: "{{ hostvars[play_hosts[0]].keepalived_password }}"
+
+- name: Persist keepalived password
+  ansible.builtin.copy:
+    content: "{{ keepalived_password }}"
+    dest: "{{ keepalived_conf_dir }}/password"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Deliver healthcheck scripts
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: /usr/local/bin/{{ item }}
+    owner: root
+    group: root
+    mode: '0755'
+  with_items:
+    - vrrp-kubelet-ok
+    - vrrp-etcd-leader
+
+- name: Configure keepalived
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: "{{ keepalived_conf_dir }}/keepalived.conf"
+    mode: '0600'
+  notify:
+    - keepalived daemon-restart
+
+- ansible.builtin.meta: flush_handlers
+
+- name: Enable Keepalived service
+  ansible.builtin.systemd_service:
+    name: keepalived.service
+    enabled: true
+  timeout: 15

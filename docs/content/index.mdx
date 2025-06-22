@@ -1,0 +1,95 @@
+# Introduction
+
+This is an e-book which follows the idea of [Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way) tutorial.
+Samewise as the original guideline, this e-book is aimed to improve the awareness
+of the essentials and internals of this complex technology.
+
+Unfortunately, the original topic doesn't cover many critical details and isn't
+targeted to directly the real production use cases for on-premise deployments.
+You still cannot run your own managed service without significant rework of artifacts
+produced by well-know utilities. Moreover, these improvements may damage reliability
+and/or security of the entire system, if you do it without understanding.
+
+The main goal of this e-book is not only provide you step-by-step guide how to
+bootstrap and configure your own Kubernetes cluster, but also how to mindfully
+make the reasonful architectural decisions.
+
+This e-book is a deeper version of the well-known and lovely tutorial. It reveals the
+internals of running the reliable and secure self-hosted Kubernetes clusters. It also
+includes the minimal set of guidelines for operation, such as security hardening,
+upgrading, patching, maintenance practices, and hints and tips for security
+engineers, platform engineers, and developers.
+
+The best reading experience is with the online version. You are in the right place:
+
+https://todo.todo.todo
+
+## Target Audience
+
+This is a must-read for all software and platform architects, and people who
+just want to get the promotion. Or course, it's also very useful for developers,
+devops engineers, reliability engineers, security engineers, even cloud
+practitioners (especially when you try to recover a broken managed Kubernetes).
+
+## Difference with The Hard Way
+
+Long story short, it's a kind of "well-architected framework" for on-premise
+Kubernetes clusters. It's even very helpful for engineering teams who develop
+their own managed services!
+
+[The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way) reveals
+how to bootstrap the simplest self-hosted Kubernetes cluster, without redundancy and
+practically insecure. It's more like a set of advanced labs for students, it's too
+far from the real production use cases.
+
+On the other side, "The Mindful Way" uncovers deeper details and thin configuration
+of the production self-hosted clusters. Practically, companies adopt Kubernetes because
+it is a simpler way to provide reliability and continuous services, than with the
+old-school ways. Thus, the production-ready solution should always have some reliability
+and security.
+
+This set of articles and code ("learn by example") explain the theory and practice of
+running self-hosted Kubernetes clusters, e.g. goes way deeper into configuration to
+provide the necessary level of service, whatever business needs. It also has the
+well-structured Ansible code which explains things better than just a spoken/written
+word.
+
+The best part: you can use the code or some parts of it for the real self-hosted cluster
+deployments or workloads configurations, with minimal changes.
+
+As mentioned above, [The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way)
+doesn't cover high-availability, maintenance procedures, security, security and
+reliability threat models, best practices, etc. And this book does! It's also useful
+as an advancement of [Kubernetes CIS benchmark](https://www.cisecurity.org/benchmark/kubernetes).
+
+## Author's Motivation
+
+The main purpose of this e-book is making the software engineers around the earth
+(hopefully, one day not only earth) more aware how to apply Kubernetes. Most of
+all engineers use only 10% of this powerful technology. Moreover, for some cases,
+inappropriate configuration of some component of the whole system might be harmful
+for the business. This book is designed to prevent such issues. And, of course,
+to simplify software engineer's job and reduce amount of work for architects and
+technical teams' managers.
+
+## Contribution
+
+Any contribution is very welcome! Feel free to leave a pull request or a GitHub
+issue, but please always remember about the following simple rules:
+
+* This book is versioned! Every new release might be patch, minor, or major
+release, similarly to a software. It's normal when you don't see your merged
+changes in the online book, please have some patience
+* For the code, snippets, and scripts, please don't forget to check the linters
+and autotests (if any for the context of change). This repository also has some
+pipeline automation
+* For the articles, please keep the similar to other pages structure
+* English version is multinational one. To make it easier for everyone around
+the world, please try to keep the language about B1 academic level
+* Other languages are free from this recommendation. And of course, any
+localization is very welcome!
+
+**Enjoy reading :)** And feel free to leave feedback, I'll appreciate!
+
+For feedback or contribution, use the link on the right panel, "Give us
+feedback" and "Edit this page" correspondingly.

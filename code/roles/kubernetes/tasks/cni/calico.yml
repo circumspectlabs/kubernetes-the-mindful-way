@@ -1,0 +1,16 @@
+- name: Create or patch Calico CRDs
+  kubernetes.core.k8s:
+    definition: "{{ item }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  loop: "{{ lookup('ansible.builtin.url', 'https://raw.githubusercontent.com/projectcalico/calico/refs/tags/v' + calico_version + '/manifests/crds.yaml', follow_redirects='safe', split_lines=False) | from_yaml_all }}"
+  run_once: true
+
+- name: Enable Calico components
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'cni/calico.manifests.j2') | from_yaml_all }}"
+    kubeconfig: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+    apply: true
+  run_once: true

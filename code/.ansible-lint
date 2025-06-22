@@ -1,0 +1,8 @@
+exclude_paths: []
+skip_list: []
+warn_list:
+  - package-latest
+  - risky-shell-pipe
+  - risky-file-permissions
+use_default_rules: true
+verbosity: 1

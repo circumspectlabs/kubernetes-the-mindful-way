@@ -1,0 +1,94 @@
+- name: Validate role settings
+  ansible.builtin.debug:
+    msg: |-
+      {% if kubernetes_profile in ["control-plane", "control-plane-noworker", "worker"] %}
+      OK
+      {% else %}
+      kubernetes_profile should be one of "control-plane", "control-plane-noworker", or "worker", not "{{ kubernetes_profile }}"
+      {% endif %}
+  failed_when: 'kubernetes_profile not in ["control-plane", "control-plane-noworker", "worker"]'
+  run_once: true
+  become: false
+
+- name: Install Kubernetes components
+  ansible.builtin.include_tasks: install.yml
+
+- name: Create users and groups for Kubernetes components
+  ansible.builtin.include_tasks: system.yml
+
+###
+### Careful! Default IP of the real instance might be
+### a public ip, but here only private network IP is
+### expected.
+### You may want to set your own private IP or get it from
+### facts with different ansible expression.
+###
+- ansible.builtin.set_fact:
+    vlan_ip: "{{ vlan_ip | default(ansible_default_ipv4.address) }}"
+
+###
+### Configure certificates for mutual TLS
+###
+### Careful! This code is quite insecure because allocates plain
+### certificates (including CA keys) onto filesystem. However,
+### the most known Kubernetes bootstrap utilities do the same
+### insecure thing :)
+### For the really hardened environments, it's recommended to use
+### some TLS CA orchestration, such as HashiCorp Vault or so on.
+### This code demonstrates how TLS configuration is supposed to
+### work. This code is as simple as possible.
+###
+- name: Configure Kubernetes CA for control-plane
+  ansible.builtin.include_tasks: ca/control-plane.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+- name: Configure Kubernetes CA for workers
+  ansible.builtin.include_tasks: ca/worker.yml
+  when: 'kubernetes_profile in ["worker"]'
+
+###
+### Control plane main components
+###
+- name: Configure Kubernetes API
+  ansible.builtin.include_tasks: core/api.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+- name: Configure Kubernetes Controller Manager
+  ansible.builtin.include_tasks: core/controller.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+- name: Configure Kubernetes Scheduler
+  ansible.builtin.include_tasks: core/scheduler.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+###
+### Node main components
+###
+- name: Configure Kubelet
+  ansible.builtin.include_tasks: core/kubelet.yml
+  when: 'kubernetes_profile in ["control-plane", "worker"]'
+
+- name: Configure Kubernetes Proxy
+  ansible.builtin.include_tasks: core/proxy.yml
+  when: 'kubernetes_profile in ["control-plane", "worker"]'
+
+###
+### Cluster shared components
+###
+- name: Configure CNI
+  ansible.builtin.include_tasks: cni.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+- name: Configure CoreDNS
+  ansible.builtin.include_tasks: other/coredns.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+- name: Configure Metrics API
+  ansible.builtin.include_tasks: other/metrics.yml
+  when: 'kubernetes_profile in ["control-plane", "control-plane-noworker"]'
+
+###
+### Additional components and convenience
+###
+- name: Configure Kubectl
+  ansible.builtin.include_tasks: kubectl.yml

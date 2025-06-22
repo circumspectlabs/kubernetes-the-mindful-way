@@ -1,0 +1,50 @@
+- name: Install security updates service (debian)
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+  when: ansible_os_family|lower == 'debian'
+  become: true
+
+- name: Configure unattended-upgrades for security patching only
+  ansible.builtin.copy:
+    src: "unattended/{{ item }}"
+    dest: "/etc/apt/apt.conf.d/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  with_items:
+    - 10periodic
+    - 20auto-upgrades
+    - 50unattended-upgrades
+  notify:
+    - dpkg-reconfigure unattended-upgrades
+  when: ansible_os_family|lower == 'debian'
+  become: true
+
+- name: Install security updates service (redhat)
+  ansible.builtin.dnf:
+    name:
+      - dnf-automatic
+    state: present
+  when: ansible_os_family|lower == 'redhat'
+  become: true
+
+- name: Configure dnf-automatic for security patching only
+  ansible.builtin.copy:
+    src: "dnf-automatic/{{ item }}"
+    dest: "/etc/dnf/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  with_items:
+    - automatic.conf
+  when: ansible_os_family|lower == 'redhat'
+  become: true
+
+- name: Enable dnf-automatic trigger
+  ansible.builtin.systemd_service:
+    name: dnf-automatic.timer
+    state: started
+    enabled: true
+  when: ansible_os_family|lower == 'redhat'
+  become: true

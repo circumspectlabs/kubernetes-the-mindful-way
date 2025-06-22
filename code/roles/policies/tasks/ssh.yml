@@ -1,0 +1,23 @@
+- name: Ensure sshd config directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Configure sshd
+  ansible.builtin.copy:
+    src: "ssh/{{ item }}"
+    dest: "/etc/ssh/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/sshd -tf %s
+  with_items:
+    - sshd_config
+    - sshd_config.d/80-policy.conf
+  notify:
+    - restart sshd
+  become: true

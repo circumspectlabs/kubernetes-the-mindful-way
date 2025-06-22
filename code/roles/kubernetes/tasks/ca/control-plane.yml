@@ -1,0 +1,189 @@
+- name: Ensure Kubernetes directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop_control:
+    label: "{{ item.path }}"
+  loop:
+    - path: "{{ kubernetes_conf_dir }}"
+    - path: "{{ kubernetes_conf_dir }}/config"
+    - path: "{{ kubernetes_sock_dir }}"
+    - path: "{{ kubernetes_conf_dir }}/pki"
+      group: "control-plane"
+      mode: '0750'
+    ###
+    ### Static manifests may contain secrets, reducing
+    ### permissions.
+    ###
+    - path: "{{ kubernetes_conf_dir }}/manifests"
+      mode: '0700'
+    - path: "{{ kubernetes_log_dir }}"
+      owner: "control-plane"
+      group: "control-plane"
+      mode: '0700'
+
+###
+### Control Plane always should have at least 4 different
+### non-intersecting certificate authorities, and every
+### authority has it's own scope.
+### Please pay attention to the file permissions. Control
+### plane components should have access only to several
+### files (e.g. shouldn't have access to API CA key).
+###
+- name: Create Kubernetes-related CA keys
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item.filename }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0600') }}"
+  loop:
+    - filename: ca.key                # CA: API
+      group: control-plane
+      mode: '0640'
+    - filename: aggregator-ca.key     # CA: API through aggregator
+    - filename: kubelet-ca.key        # CA: kubelets
+  run_once: true
+
+- name: Kubernetes API CA
+  block:
+    - name: Create Kubernetes API CA certificate sign request (self)
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/ca.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/ca.key"
+        common_name: kubernetes-ca
+        basic_constraints:
+          - CA:TRUE
+        basic_constraints_critical: true
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes API CA certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/ca.key"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/ca.csr"
+        provider: selfsigned
+        owner: root
+        group: control-plane
+        mode: '0644'
+  run_once: true
+
+- name: Kubernetes Aggregator CA
+  block:
+    - name: Create Kubernetes Aggregator CA certificate sign request (self)
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/aggregator-ca.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/aggregator-ca.key"
+        common_name: aggregator-ca
+        basic_constraints:
+          - CA:TRUE
+        basic_constraints_critical: true
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes Aggregator CA certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/aggregator-ca.crt"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/aggregator-ca.key"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/aggregator-ca.csr"
+        provider: selfsigned
+        owner: root
+        group: root
+        mode: '0644'
+  run_once: true
+
+- name: Kubelet CA
+  block:
+    - name: Create Kubernetes Kubelet CA certificate sign request (self)
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.key"
+        common_name: kubelet-ca
+        basic_constraints:
+          - CA:TRUE
+        basic_constraints_critical: true
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Kubernetes Kubelet CA certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.crt"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.key"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/kubelet-ca.csr"
+        provider: selfsigned
+        owner: root
+        group: root
+        mode: '0644'
+  run_once: true
+
+- name: Create service account key
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+    owner: root
+    group: control-plane
+    mode: '0640'
+  loop:
+    - service-account.key
+  run_once: true
+
+- name: Get Kubernetes CA files
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+  register: kubernetes_slurp
+  loop:
+    - "ca.crt"
+    - "ca.key"
+    - "aggregator-ca.crt"
+    - "aggregator-ca.key"
+    - "kubelet-ca.crt"
+    - "kubelet-ca.key"
+    - "service-account.key"
+  run_once: true
+
+- ansible.builtin.set_fact:
+    ca_crt: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
+    ca_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
+    aggregator_ca_crt: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'aggregator-ca.crt') | map(attribute='content') | first | b64decode }}"
+    aggregator_ca_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'aggregator-ca.key') | map(attribute='content') | first | b64decode }}"
+    kubelet_ca_crt: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.crt') | map(attribute='content') | first | b64decode }}"
+    kubelet_ca_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.key') | map(attribute='content') | first | b64decode }}"
+    service_account_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'service-account.key') | map(attribute='content') | first | b64decode }}"
+
+- name: Put Kubernetes CA files
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ kubernetes_conf_dir }}/pki/{{ item.file }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0600') }}"
+  loop_control:
+    label: "{{ item.file }}"
+  loop:
+    - content: "{{ ca_crt }}"
+      file: "ca.crt"
+      group: control-plane
+      mode: '0644'
+    - content: "{{ ca_key }}"
+      group: control-plane
+      mode: '0640'
+      file: "ca.key"
+    - content: "{{ aggregator_ca_crt }}"
+      file: "aggregator-ca.crt"
+      mode: '0644'
+    - content: "{{ aggregator_ca_key }}"
+      file: "aggregator-ca.key"
+    - content: "{{ kubelet_ca_crt }}"
+      file: "kubelet-ca.crt"
+      mode: '0644'
+    - content: "{{ kubelet_ca_key }}"
+      file: "kubelet-ca.key"
+    - content: "{{ service_account_key }}"
+      file: "service-account.key"
+      group: control-plane
+      mode: '0640'

@@ -1,0 +1,41 @@
+###
+### Runc
+###
+runc_version: 1.2.5
+
+###
+### Containerd
+###
+containerd_version: 2.0.4
+containerd_conf_dir: /etc/containerd
+containerd_data_dir: /var/lib/containerd
+containerd_state_dir: /run/containerd
+
+containerd_gid: 65312
+
+# you may need to update these settings depending on how large
+# is your cluster
+containerd_restart_timeout: 30
+
+# usage: {{ machine_arch_map[ansible_architecture] }}
+machine_arch_map:
+  aarch64: arm64
+  arm64: arm64
+  x86_64: amd64
+  amd64: amd64
+
+runc_force_upgrade: "{{ force_upgrade | default(false) }}"
+containerd_force_upgrade: "{{ force_upgrade | default(false) }}"
+
+###
+### Nvidia Container Toolkit
+###
+### Careful! The feature is poorly tested!
+### In addition, the feature has the list of known platform limitations
+### and a pretty small list of supported operating systems and
+### architectures.
+### Details:
+###   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/index.html
+###   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/supported-platforms.html
+###
+containerd_nvidia_runtime: false

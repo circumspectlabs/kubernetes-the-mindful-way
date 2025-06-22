@@ -1,0 +1,97 @@
+import { Callout } from 'nextra/components';
+
+# Finite State Machines
+
+The article explains one of the main patterns of Kubernetes. It's a must-read
+for all junior-level software and security engineers.
+
+---
+
+**Finite State Machines** is the system pattern, which has a set of algorithms
+of transforming objects, their statuses, and attributes. Every state machine
+can transform (change) object by interface (available attributes) between some
+exact states.
+
+## Machine Example
+
+It's simple to explain by example: there is a finite state machine for changing
+pod status from "scheduling" to "pending".
+
+This machine listens for just created pods in the control plane without node
+assigned, it is a very initial status of pod. In other words, it waits for all
+Pod objects (attribute ".kind" is "Pod") with a specific status (attribute
+".status.phase" is "Pending" or undefined, and the ".spec.nodeName" is undefined).
+This set of parameters the machine is looking for is the "interface" of the
+machine.
+
+As soon as the machine found a new object, it performs the necessary actions
+(identifies the best fit node for this new pod, communicates with pod scheduler
+and kubelet) and updates the object state (announces the new status, modifies
+".spec.nodeName" and ".status.hostIP" fields, etc.). After that, this object might
+fit to another machine's interface (e.g. kubelet's CNI handler).
+
+## Chains and Loops
+
+Kubernetes is a complex system with thousands of state machines, chained to
+each other and sometimes even cycled. For example, when you create a pod,
+it passes at least through the state machines which perform transition of the
+object between Pending → Running → Succeeded states.
+
+Practically, almost all machines are non-atomic. It means that they might have
+different output depending on the object, configuration, etc. For example, a
+pod with "Running" state might come to "Succeeded" or "Failed" state depending
+on the behavior of the application in the pod.
+
+More complex case: cycled state machines. For example, when you run some pod,
+it might end up with "Failed" state. Then, it activates the new state machine
+which waits some time and restarts this pod. This may repeat until the
+successful execution. The only change between iterations is a delay before
+start (it increases every iteration).
+
+<Callout type="warning">
+Cycled state machines are dangerous, same as the infinite loops in
+programming. Ensure your state machines can exit from this loop. It also might
+be useful to enable integration tests for this case, if you develop some
+operator.
+</Callout>
+
+## Native and External
+
+Native state machines are the embedded logic of Kubernetes. And it is
+expandable and modifiable. For example, you can write your own scheduler for
+Kubernetes, or modify its logic as you want. By the way, it's not recommended
+because might significantly increase the complexity of the whole system.
+
+Another case: Kubernetes Operators. This is the external state machines you
+can bring to your cluster. For example, a very useful operator-like solution:
+cert-manager. It allows issuing SSL certificates right in the Kubernetes
+environment, and it's easy to install.
+
+## Risks of Operators
+
+Unfortunately, it's not that simple. There is a term [Cognitive Complexity](https://en.wikipedia.org/wiki/Cognitive_complexity).
+Kubernetes is complex, and every new operator makes it even more complex.
+Every new state machine makes your systems more complex for troubleshooting
+and the next maintenance.
+
+The risks of using Kubernetes operators is usually directly addressed to
+reliability and security. For example, when you work with "Stash" operator
+which only enables ability to back up your workloads, then you must deploy
+extra pods with direct access to the Kubernetes API, including "pod/exec"
+action. In case of leak of its service account token, the whole cluster
+might be compromised. In addition, Stash operator enables a sidecar
+container, thus enables the risks of unstable work (i.e. in case of memory
+leak in this sidecar pod, or even bug in the logic of dump of a database or
+a filesystem).
+
+Every operator increases the costs of maintenance of the whole system. If you
+want to adopt the operator, ensure it saves more resources (you don't need
+to implement your own backup system nor maintain it too much) than consumes
+(it requires some efforts from maintainers).
+
+## Quick Summary
+
+After you read this topic, you should understand the essential part of the
+[Automata Theory](https://en.wikipedia.org/wiki/Finite-state_machine). Now
+it should be simple to systematize your knowledge about behavior of
+Kubernetes objects.

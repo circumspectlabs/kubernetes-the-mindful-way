@@ -1,0 +1,105 @@
+- name: Ensure Kubernetes directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop_control:
+    label: "{{ item.path }}"
+  loop:
+    - path: "{{ kubernetes_conf_dir }}"
+    - path: "{{ kubernetes_conf_dir }}/config"
+    - path: "{{ kubernetes_sock_dir }}"
+    - path: "{{ kubernetes_conf_dir }}/pki"
+      mode: '0750'
+    ###
+    ### Static manifests may contain secrets, reducing
+    ### permissions.
+    ###
+    - path: "{{ kubernetes_conf_dir }}/manifests"
+      mode: '0700'
+    - path: "{{ kubernetes_log_dir }}"
+      mode: '0700'
+
+- name: Get Kubernetes CA files
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+  register: kubernetes_slurp
+  loop:
+    - "ca.crt"
+    - "ca.key"
+    - "kubelet-ca.crt"
+    - "kubelet-ca.key"
+  delegate_to: "{{ groups[kubernetes_control_plane_group_name] | first }}"
+
+- ansible.builtin.set_fact:
+    ca_crt: "{{ kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
+    ca_key: "{{ kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
+    kubelet_ca_crt: "{{ kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.crt') | map(attribute='content') | first | b64decode }}"
+    kubelet_ca_key: "{{ kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.key') | map(attribute='content') | first | b64decode }}"
+
+- name: Put Kubernetes CA files
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ kubernetes_conf_dir }}/pki/{{ item.file }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0600') }}"
+  loop_control:
+    label: "{{ item.file }}"
+  loop:
+    - content: "{{ ca_crt }}"
+      file: "ca.crt"
+      mode: '0644'
+    - content: "{{ kubelet_ca_crt }}"
+      file: "kubelet-ca.crt"
+      mode: '0644'
+
+- name: API Client
+  block:
+    - name: Create Kubernetes API keys
+      community.crypto.openssl_privatekey:
+        path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - client.key
+    - name: Create Kubernetes API client certificate sign request
+      community.crypto.openssl_csr:
+        path: "{{ kubernetes_conf_dir }}/pki/client.csr"
+        privatekey_path: "{{ kubernetes_conf_dir }}/pki/client.key"
+        common_name: cluster-admin
+        organization_name: system:masters
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - keyAgreement
+        extended_key_usage:
+          - clientAuth
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Create Kubernetes API client certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubernetes_conf_dir }}/pki/client.crt"
+        csr_path: "{{ kubernetes_conf_dir }}/pki/client.csr"
+        ownca_path: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        ownca_privatekey_content: "{{ ca_key }}"
+        provider: ownca
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Configure Kubernetes config for "cluster-admin"
+      ansible.builtin.template:
+        src: kubeconfig/system.j2
+        dest: "{{ kubernetes_conf_dir }}/config/cluster-admin"
+        owner: root
+        group: root
+        mode: '0600'
+      vars:
+        server: "https://{{ vrrp_ip }}:6443"
+        certificate_authority: "{{ kubernetes_conf_dir }}/pki/ca.crt"
+        client_certificate: "{{ kubernetes_conf_dir }}/pki/client.crt"
+        client_key: "{{ kubernetes_conf_dir }}/pki/client.key"

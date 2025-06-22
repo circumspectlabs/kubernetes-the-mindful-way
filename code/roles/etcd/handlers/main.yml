@@ -1,0 +1,6 @@
+- name: etcd daemon-restart
+  ansible.builtin.systemd_service:
+    state: restarted
+    name: etcd.service
+  timeout: "{{ etcd_restart_timeout }}"
+  throttle: 1

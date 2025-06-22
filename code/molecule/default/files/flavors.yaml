@@ -1,0 +1,169 @@
+amd64:
+  ubuntu:
+    noble: &x_amd64_ubuntu_noble
+      address: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+      guest_os: linux
+    jammy: &x_amd64_ubuntu_jammy
+      address: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+      guest_os: linux
+    focal: &x_amd64_ubuntu_focal
+      address: https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+      guest_os: linux
+    bionic: &x_amd64_ubuntu_bionic
+      address: https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img
+      guest_os: linux
+    latest: *x_amd64_ubuntu_noble
+    "24.04": *x_amd64_ubuntu_noble
+    "24": *x_amd64_ubuntu_noble
+    "22.04": *x_amd64_ubuntu_jammy
+    "22": *x_amd64_ubuntu_jammy
+    "20.04": *x_amd64_ubuntu_focal
+    "20": *x_amd64_ubuntu_focal
+    "18.04": *x_amd64_ubuntu_bionic
+    "18": *x_amd64_ubuntu_bionic
+  debian:
+    bookworm: &x_amd64_debian_bookworm
+      address: https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+      guest_os: linux
+    bullseye: &x_amd64_debian_bullseye
+      address: https://cdimage.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2
+      guest_os: linux
+    buster: &x_amd64_debian_buster
+      address: https://cdimage.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2
+      guest_os: linux
+    latest: *x_amd64_debian_bookworm
+    "12": *x_amd64_debian_bookworm
+    "11": *x_amd64_debian_bullseye
+    "10": *x_amd64_debian_buster
+  centos:
+    "9": &x_amd64_centos_9
+      address: https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2
+      guest_os: linux
+    "8.4": &x_amd64_centos_8_4
+      address: https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2
+      guest_os: linux
+    "8.3":
+      address: https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.3.2011-20201204.2.x86_64.qcow2
+      guest_os: linux
+    "8.2":
+      address: https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.2.2004-20200611.2.x86_64.qcow2
+      guest_os: linux
+    "8.1":
+      address: https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.1.1911-20200113.3.x86_64.qcow2
+      guest_os: linux
+    latest: *x_amd64_centos_9
+    stream: *x_amd64_centos_9
+    "8": *x_amd64_centos_8_4
+  fedora:
+    "41": &x_amd64_fedora_41
+      address: https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-UEFI-UKI-41-1.4.x86_64.qcow2
+      guest_os: linux
+    "40":
+      address: https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-UEFI-UKI.x86_64-40-1.14.qcow2
+      guest_os: linux
+    latest: *x_amd64_fedora_41
+  alpine:
+    "3.21": &x_amd64_alpine_3_21
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/nocloud_alpine-3.21.2-x86_64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: &x_alpine_settings
+        shell: /bin/sh
+        init_packages:
+          - sudo
+    "3.20":
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/cloud/nocloud_alpine-3.20.5-x86_64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3.19":
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/cloud/nocloud_alpine-3.19.6-x86_64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3.18":
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.18/releases/cloud/nocloud_alpine-3.18.11-x86_64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3": *x_amd64_alpine_3_21
+    latest: *x_amd64_alpine_3_21
+arm64:
+  ubuntu:
+    noble: &x_arm64_ubuntu_noble
+      address: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img
+      guest_os: linux
+    jammy: &x_arm64_ubuntu_jammy
+      address: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img
+      guest_os: linux
+    focal: &x_arm64_ubuntu_focal
+      address: https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-arm64.img
+      guest_os: linux
+    bionic: &x_arm64_ubuntu_bionic
+      address: https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-arm64.img
+      guest_os: linux
+    latest: *x_arm64_ubuntu_noble
+    "24.04": *x_arm64_ubuntu_noble
+    "24": *x_arm64_ubuntu_noble
+    "22.04": *x_arm64_ubuntu_jammy
+    "22": *x_arm64_ubuntu_jammy
+    "20.04": *x_arm64_ubuntu_focal
+    "20": *x_arm64_ubuntu_focal
+    "18.04": *x_arm64_ubuntu_bionic
+    "18": *x_arm64_ubuntu_bionic
+  debian:
+    bookworm: &x_arm64_debian_bookworm
+      address: https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2
+      guest_os: linux
+    bullseye: &x_arm64_debian_bullseye
+      address: https://cdimage.debian.org/images/cloud/bullseye/latest/debian-11-generic-arm64.qcow2
+      guest_os: linux
+    buster: &x_arm64_debian_buster
+      address: https://cdimage.debian.org/images/cloud/buster/latest/debian-10-generic-arm64.qcow2
+      guest_os: linux
+    latest: *x_arm64_debian_bookworm
+    "12": *x_arm64_debian_bookworm
+    "11": *x_arm64_debian_bullseye
+    "10": *x_arm64_debian_buster
+  centos:
+    "9": &x_arm64_centos_9
+      address: https://cloud.centos.org/centos/9-stream/aarch64/images/CentOS-Stream-GenericCloud-9-latest.aarch64.qcow2
+      guest_os: linux
+    "8.4": &x_arm64_centos_8_4
+      address: https://cloud.centos.org/centos/8/aarch64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.aarch64.qcow2
+      guest_os: linux
+    "8.3":
+      address: https://cloud.centos.org/centos/8/aarch64/images/CentOS-8-GenericCloud-8.3.2011-20201204.2.aarch64.qcow2
+      guest_os: linux
+    "8.2":
+      address: https://cloud.centos.org/centos/8/aarch64/images/CentOS-8-GenericCloud-8.2.2004-20200611.2.aarch64.qcow2
+      guest_os: linux
+    "8.1":
+      address: https://cloud.centos.org/centos/8/aarch64/images/CentOS-8-GenericCloud-8.1.1911-20200113.3.aarch64.qcow2
+      guest_os: linux
+    latest: *x_arm64_centos_9
+    stream: *x_arm64_centos_9
+    "8": *x_arm64_centos_8_4
+  fedora:
+    "41": &x_arm64_fedora_41
+      address: https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/aarch64/images/Fedora-Cloud-Base-UEFI-UKI-41-1.4.aarch64.qcow2
+      guest_os: linux
+    "40":
+      address: https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-Base-UEFI-UKI.aarch64-40-1.14.qcow2
+      guest_os: linux
+    latest: *x_arm64_fedora_41
+  alpine:
+    "3.21": &x_arm64_alpine_3_21
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/nocloud_alpine-3.21.2-aarch64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3.20":
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/cloud/nocloud_alpine-3.20.5-aarch64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3.19":
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/cloud/nocloud_alpine-3.19.6-aarch64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3.18":
+      address: https://dl-cdn.alpinelinux.org/alpine/v3.18/releases/cloud/nocloud_alpine-3.18.11-aarch64-uefi-cloudinit-r0.qcow2
+      guest_os: linux
+      settings: *x_alpine_settings
+    "3": *x_arm64_alpine_3_21
+    latest: *x_arm64_alpine_3_21

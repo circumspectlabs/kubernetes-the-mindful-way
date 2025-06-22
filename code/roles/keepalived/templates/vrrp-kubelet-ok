@@ -1,0 +1,4 @@
+#!/bin/bash
+if ! kubectl --kubeconfig={{ kubernetes_conf_dir }}/config/cluster-admin --request-timeout=3s get --ignore-not-found=true nodes -o name &>/dev/null; then
+    exit 1
+fi

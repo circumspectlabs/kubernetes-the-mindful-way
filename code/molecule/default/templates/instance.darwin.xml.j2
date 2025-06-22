@@ -1,0 +1,146 @@
+<domain type='{{ item_virtualization }}' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+  <name>{{ item_name }}</name>
+  <memory unit='MiB'>{{ ((item_memory_size | human_to_bytes)/1048576) | round(0, 'floor') | int }}</memory>
+{% if host_arch != item_arch %}
+  <!--
+    Memory balloon isn't available until root filesistem (not rootfs image) become
+    available. Binary instruction translation may overcome this limit while booting
+    the kernel. This resolves issue with OOMKiller before dbus successful boot.
+  -->
+  <currentMemory unit='MiB'>{{ (('1024M' | human_to_bytes)/1048576) | round(0, 'floor') | int }}</currentMemory>
+{% else %}
+  <currentMemory unit='MiB'>{{ (('256M' | human_to_bytes)/1048576) | round(0, 'floor') | int }}</currentMemory>
+{% endif %}
+  <vcpu>{{ item_vcpu }}</vcpu>
+  <sysinfo type="smbios">
+    <system>
+      <entry name="serial">ds=nocloud</entry>
+    </system>
+  </sysinfo>
+  <os>
+    <type arch='{{ item_extra_settings.domain_arch }}' machine='{{ item_extra_settings.machine }}'>hvm</type>
+{% if (item_uefi_firmware_code == 'none') or (item_uefi_firmware_vars_template == 'none') %}
+    <!-- Attempt to load without UEFI support -->
+{% else %}
+    <loader readonly='yes' secure='{{ item_extra_settings.feature_secureboot | ternary("yes","no") }}' type='pflash'>{{ item_uefi_firmware_code }}</loader>
+    <nvram template='{{ item_uefi_firmware_vars_template }}' templateFormat='raw' format='raw'>{{ item_uefi_firmware_vars }}</nvram>
+{% endif %}
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <pae/>
+    <acpi/>
+    <apic/>
+{% if item_extra_settings.feature_smm %}
+    <smm state='on'>
+      <tseg unit='MiB'>48</tseg>
+    </smm>
+{% endif %}
+  </features>
+  <cpu mode='custom' match='exact' check='none'>
+    <model fallback='forbid'>{{ item_extra_settings.cpu_model }}</model>
+  </cpu>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+{% if item_extra_settings.feature_suspend %}
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='yes'/>
+  </pm>
+{% endif %}
+  <devices>
+    <!-- <emulator>/opt/homebrew/bin/qemu-system-x86_64</emulator> -->
+    <!-- PCI -->
+    <controller type="pci" model="pcie-root"/>
+    <!-- Volumes -->
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{ molecule_ephemeral_directory }}/{{ item_name }}/root.qcow2'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <controller type="scsi" model="virtio-scsi"/>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{{ molecule_ephemeral_directory }}/{{ item_name }}/cloud-init.iso'/>
+      <target dev='sdc' bus='scsi'/>
+      <readonly/>
+    </disk>
+    <!-- Network -->
+    <interface type='client'>
+      <mac address='{{ item_mac_address }}'/>
+      <source address='{{ gvswitch_qemu_listen.address }}' port='{{ gvswitch_qemu_listen.port }}'/>
+    </interface>
+    <!-- Input -->
+    <controller type="usb" model="qemu-xhci" ports="15"/>
+    <input type='tablet' bus='usb'/>
+    <input type='mouse' bus='usb'/>
+    <input type='keyboard' bus='usb'/>
+    <!-- CLI -->
+    <serial type='pty'>
+      <target port='0'/>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <!-- Video settings -->
+    <graphics type='vnc'>
+      <listen type="none"/>
+      <image compression='off'/>
+      <clipboard copypaste='yes'/>
+      <filetransfer enable='yes'/>
+      <gl enable='yes'/>
+      <audio id='1'/>
+    </graphics>
+    <channel type="unix">
+      <source mode="bind"/>
+      <target type="virtio" name="org.qemu.guest_agent.0"/>
+    </channel>
+    <channel type="unix">
+      <source mode="bind"/>
+      <target type="virtio" name="org.libguestfs.channel.0"/>
+    </channel>
+    <channel type="unix">
+      <source mode="bind"/>
+      <target type="virtio" name="org.spice-space.webdav.0"/>
+    </channel>
+    <channel type="unix">
+      <source mode="bind"/>
+      <target type="virtio" name="com.redhat.spice.0"/>
+    </channel>
+    <video>
+      <model type='virtio'/>
+    </video>
+    <!-- Audio settings -->
+    <sound model='ich9'>
+      <codec type='micro'/>
+      <audio id='1'/>
+    </sound>
+    <audio id="1" type="coreaudio">
+      <input bufferCount="50"/>
+      <output bufferCount="42"/>
+    </audio>
+    <!-- Misc -->
+    <tpm model='tpm-tis'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+  </devices>
+  <qemu:commandline>
+{% if item_arch =='arm64' %}
+    <qemu:arg value='-machine'/>
+    <qemu:arg value='type={{ item_extra_settings.machine }},highmem=on'/>
+{% endif %}
+{% if host_arch != item_arch %}
+    <qemu:arg value='-accel'/>
+    <qemu:arg value='tcg,thread=multi'/>
+{% endif %}
+  </qemu:commandline>
+</domain>

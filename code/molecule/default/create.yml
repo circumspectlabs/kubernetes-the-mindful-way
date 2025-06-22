@@ -1,0 +1,433 @@
+---
+- name: Create
+  hosts: localhost
+  gather_facts: true
+  gather_subset: ["all_ipv4_addresses", "all_ipv6_addresses", "architecture", "default_ipv4", "default_ipv6", "distribution", "env", "interfaces"]
+  gather_timeout: 10
+  no_log: "{{ molecule_no_log | default('false') }}"
+  vars:
+    molecule_inventory: {}
+    molecule_timeout: "{{ molecule_yml.driver.settings.timeout | default(300) }}"
+    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_NAME') }}"
+    user_home_directory: "{{ lookup('env', 'HOME') }}"
+    molecule_dns_suffix: "{{ molecule_yml.driver.settings.dns_suffix | default('molecule.local') }}"
+    molecule_network_cidr: "{{ molecule_yml.driver.settings.network_cidr | default('100.127.255.0/24') }}"
+    molecule_mac: "{{ molecule_yml.driver.settings.mac | default('80:e2:12:00:00:00') }}"
+    molecule_ssh_user: "{{ molecule_yml.driver.settings.ssh_user | default('molecule') }}"
+    libvirt_default_image_path: "{{ user_home_directory }}/.cache/molecule/libvirt-images"
+    gvswitch_default_binary_path: "{{ user_home_directory }}/.cache/molecule/gvswitch"
+    gvswitch_project_url: "https://github.com/circumspectlabs/gvswitch"
+    gvswitch_version: "0.0.2"
+    default_disk_size: "10G"
+    default_memory_size: "2G"
+    default_vcpu: "1"
+    molecule_network_directory: "{{ molecule_ephemeral_directory }}/network"
+    molecule_temp_folder: "{{ molecule_ephemeral_directory }}/tmp"
+    molecule_private_key_path: "{{ molecule_ephemeral_directory }}/id_ecdsa"
+    ###
+    ### Scripts
+    ###
+    script_detect_libvirt_uri: |-
+      virsh uri
+    script_detect_host_arch: |-
+      case "{{ ansible_facts.architecture }}" in
+        aarch64|arm64)
+          echo "arm64";;
+        x64|x86_64|amd64)
+          echo "amd64";;
+        *)
+          echo 'architecture "{{ ansible_facts.architecture }}" is unsupported or not implemented'
+          exit 1
+          ;;
+      esac
+    script_detect_virtualization: |-
+      case "{{ ansible_facts.system | lower }}" in
+        darwin)
+          if [[ "$(sysctl -n kern.hv_support)" == "1" ]]; then
+            if [[ "{{ host_arch }}" == "{{ item_arch }}" ]]; then
+              echo "hvf"
+              exit 0
+            fi
+          fi
+          echo "qemu"
+          ;;
+        linux)
+          # echo "kvm"
+          echo "todo"
+          ;;
+        windows)
+          echo "todo"
+          ;;
+        *)
+          echo 'virtualization for "{{ ansible_facts.system | lower }}" is unsupported or unimplemented'
+          exit 1
+          ;;
+      esac
+    script_detect_extra_settings: |-
+      case "{{ item_arch }}" in
+        arm64)
+          echo '{
+            "machine": "virt",
+            "domain_arch": "aarch64",
+            "cpu_model": "cortex-a53",
+            "feature_suspend": false,
+            "feature_secureboot": false,
+            "feature_smm": false
+          }'
+          ;;
+        amd64)
+          echo '{
+            "machine": "q35",
+            "domain_arch": "x86_64",
+            "cpu_model": "qemu64",
+            "feature_suspend": true,
+            "feature_secureboot": true,
+            "feature_smm": true
+          }'
+          ;;
+        *)
+          echo 'architecture "{{ item_arch }}" is unsupported or unimplemented'
+          exit 1
+          ;;
+      esac
+    script_detect_uefi_firmware_code: |-
+      _UEFI_CODE_FILE="none"
+      case "host:{{ ansible_facts.system | lower }}:::guestarch:{{ item_arch }}" in
+        "host:darwin:::guestarch:arm64")
+          _UEFI_CODE_FILE="$(dirname $(dirname $(realpath $(which qemu-system-x86_64))))/share/qemu/edk2-aarch64-code.fd"
+          ;;
+        "host:darwin:::guestarch:amd64")
+          _UEFI_CODE_FILE="$(dirname $(dirname $(realpath $(which qemu-system-x86_64))))/share/qemu/edk2-x86_64-secure-code.fd"
+          ;;
+        "host:linux:::guestarch:arm64")
+          _UEFI_CODE_FILE="todo"
+          ;;
+        "host:linux:::guestarch:amd64")
+          _UEFI_CODE_FILE="todo"
+          ;;
+        "host:windows:::guestarch:arm64")
+          _UEFI_CODE_FILE="todo"
+          ;;
+        "host:windows:::guestarch:amd64")
+          _UEFI_CODE_FILE="todo"
+          ;;
+        *)
+          echo 'uefi for "{{ ansible_facts.system | lower }}" host OS and "{{ item_arch }}" guest arch is unsupported or unimplemented' >&2
+          ;;
+      esac
+      if [[ ! -f "${_UEFI_CODE_FILE}" ]]; then
+        _UEFI_CODE_FILE="none"
+      fi
+      echo "${_UEFI_CODE_FILE}"
+    script_detect_uefi_firmware_vars_template: |-
+      _UEFI_VARS_FILE="none"
+      case "host:{{ ansible_facts.system | lower }}:::guestarch:{{ item_arch }}" in
+        "host:darwin:::guestarch:arm64")
+          _UEFI_VARS_FILE="$(dirname $(dirname $(realpath $(which qemu-system-x86_64))))/share/qemu/edk2-arm-vars.fd"
+          ;;
+        "host:darwin:::guestarch:amd64")
+          _UEFI_VARS_FILE="$(dirname $(dirname $(realpath $(which qemu-system-x86_64))))/share/qemu/edk2-i386-vars.fd"
+          ;;
+        "host:linux:::guestarch:arm64")
+          _UEFI_VARS_FILE="todo"
+          ;;
+        "host:linux:::guestarch:amd64")
+          _UEFI_VARS_FILE="todo"
+          ;;
+        "host:windows:::guestarch:arm64")
+          _UEFI_VARS_FILE="todo"
+          ;;
+        "host:windows:::guestarch:amd64")
+          _UEFI_VARS_FILE="todo"
+          ;;
+        *)
+          echo 'uefi for "{{ ansible_facts.system | lower }}" host OS and "{{ item_arch }}" guest arch is unsupported or unimplemented' >&2
+          ;;
+      esac
+      if [[ ! -f "${_UEFI_VARS_FILE}" ]]; then
+        _UEFI_VARS_FILE="none"
+      fi
+      echo "${_UEFI_VARS_FILE}"
+  tasks:
+    ###
+    ### Globals
+    ###
+    - name: Create corresponding directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+      with_items: "{{ [libvirt_default_image_path, molecule_network_directory] + ([molecule_ephemeral_directory] | product(molecule_yml.platforms | map(attribute='name')) | map('join', '/')) }}"
+
+    - ansible.builtin.set_fact:
+        host_os: "{{ ansible_facts.system | lower }}"
+        host_arch: "{{ lookup('ansible.builtin.pipe', script_detect_host_arch) }}"
+        libvirt_uri: "{{ lookup('ansible.builtin.pipe', script_detect_libvirt_uri) }}"
+        gvswitch_qemu_listen:
+          address: "127.0.0.1"
+          port: "{{ 58000 + (((molecule_ephemeral_directory | md5 | batch(8)).0 | join | int(base=16)) % 1000) }}"
+
+    ###
+    ### Instance settings
+    ###
+    - name: Compute instances settings
+      ansible.builtin.debug:
+        msg: ok
+      changed_when: false
+      loop: &x_instances_loop "{{ molecule_yml.platforms }}"
+      loop_control: &x_instances_loop_control
+        label: "{{ item.name }}"
+        extended: true
+      vars: &x_instances_vars
+        item_index: "{{ ansible_loop.index }}"
+        item_name: "{{ item.name | mandatory('You must specify unique name of instance.') }}"
+        item_arch: "{{ ((item.arch | default('native')) == 'native') | ternary(host_arch, item.arch) }}"
+        item_flavor: "{{ (item.flavor | split(':')).0 | mandatory('You must specify OS flavor for instance, e.g \"ubuntu\", \"\" ') }}"
+        item_flavor_version: "{{ (item.flavor | split(':')).1 | default('latest') }}"
+        item_guest_os: "{{ item.guest_os | default((lookup('file', 'flavors.yaml') | from_yaml)[item_arch][item_flavor][item_flavor_version].guest_os) | mandatory('It seems you use some undefined OS flavor, not present in \"files/flavors.yaml\" or unavailable for this architecture. Please specify \"guest_os\" for the instance.') }}"
+        item_image_url: "{{ item.image_url | default((lookup('file', 'flavors.yaml') | from_yaml)[item_arch][item_flavor][item_flavor_version].address) | mandatory('It seems you use some undefined OS flavor, not present in \"files/flavors.yaml\" or unavailable for this architecture. Please specify \"image_url\" for the instance.') }}"
+        item_image_location: "{{ libvirt_default_image_path }}/{{ item_image_url | split('/') | last }}"
+        item_ip: "{{ (item.ip | default(molecule_network_cidr | ansible.utils.ipaddr(100 + ansible_loop.index))) | ansible.utils.ipaddr('address') }}"
+        item_disk_size: "{{ item.disk_size | default(default_disk_size) }}"
+        item_memory_size: "{{ item.memory_size | default(default_memory_size) }}"
+        item_mac_address: "80:e2:12:{{ (item.name | md5 | batch(2) | map('join') | batch(3)).1 | join(':') }}"
+        item_bind_port: "{{ 59000 + ((((molecule_ephemeral_directory + item.name) | md5 | batch(8)).0 | join | int(base=16)) % 1000) }}"
+        item_vcpu: "{{ item.vcpu | default(default_vcpu) }}"
+        item_virtualization: "{{ lookup('ansible.builtin.pipe', script_detect_virtualization) }}"
+        item_extra_settings: "{{ lookup('ansible.builtin.pipe', script_detect_extra_settings) | from_json | ansible.builtin.combine((lookup('file', 'flavors.yaml') | from_yaml)[item_arch][item_flavor][item_flavor_version].settings | default({})) }}"
+        item_uefi_firmware_code: "{{ lookup('ansible.builtin.pipe', script_detect_uefi_firmware_code) }}"
+        item_uefi_firmware_vars_template: "{{ lookup('ansible.builtin.pipe', script_detect_uefi_firmware_vars_template) }}"
+        item_uefi_firmware_vars: "{{ molecule_ephemeral_directory }}/{{ item_name }}/uefi-vars.fd"
+
+    ###
+    ### Image
+    ###
+    - name: Ensure machine images folder exists
+      ansible.builtin.file:
+        path: "{{ libvirt_default_image_path }}"
+        state: directory
+
+    - name: Get cloud images
+      block:
+        - name: Get cloud images (check if cached)
+          ansible.builtin.stat:
+            path: "{{ item_image_location }}"
+          register: molecule_cloud_image_stat
+          loop: *x_instances_loop
+          loop_control: *x_instances_loop_control
+          vars: *x_instances_vars
+        - name: Get cloud images (download)
+          ansible.builtin.get_url:
+            url: "{{ item_image_url }}"
+            dest: "{{ libvirt_default_image_path }}/"
+            mode: '0644'
+          when: "not molecule_cloud_image_stat.results[ansible_loop.index0].stat.exists"
+          loop: *x_instances_loop
+          loop_control: *x_instances_loop_control
+          vars: *x_instances_vars
+
+    ###
+    ### Network
+    ###
+    - name: Ensure network emulator folder exists
+      ansible.builtin.file:
+        path: "{{ gvswitch_default_binary_path }}"
+        state: directory
+
+    - name: Get userspace network emulator
+      block:
+        - name: Get userspace network emulator (check if cached)
+          ansible.builtin.stat:
+            path: "{{ gvswitch_default_binary_path }}/gvswitch_v{{ gvswitch_version }}_{{ host_os }}_{{ host_arch }}.zip"
+          register: molecule_network_emulator_stat
+
+        - name: Get userspace network emulator (download)
+          ansible.builtin.get_url:
+            url: "{{ gvswitch_project_url }}/releases/download/v{{ gvswitch_version }}/gvswitch_v{{ gvswitch_version }}_{{ host_os }}_{{ host_arch }}.zip"
+            dest: "{{ gvswitch_default_binary_path }}/gvswitch_v{{ gvswitch_version }}_{{ host_os }}_{{ host_arch }}.zip"
+            mode: '0644'
+          when: "not molecule_network_emulator_stat.stat.exists"
+
+        - name: Get userspace network emulator (unpack)
+          ansible.builtin.unarchive:
+            src: "{{ gvswitch_default_binary_path }}/gvswitch_v{{ gvswitch_version }}_{{ host_os }}_{{ host_arch }}.zip"
+            dest: "{{ molecule_network_directory }}"
+
+    - name: Create gvswitch network config
+      ansible.builtin.template:
+        src: network.yaml.j2
+        dest: "{{ molecule_network_directory }}/network.yaml"
+
+    - name: Start gvswitch network
+      ansible.builtin.command:
+        argv:
+          - /bin/bash
+          - -c
+          - |-
+            if cat "{{ molecule_network_directory }}/gvswitch.pid" &> /dev/null && ps -p "$(cat "{{ molecule_network_directory }}/gvswitch.pid")" &>/dev/null; then
+              echo ALREADY RUNNING
+              exit 0
+            fi
+            nohup "{{ molecule_network_directory }}/gvswitch" serve -c "{{ molecule_network_directory }}/network.yaml" </dev/null &>{{ molecule_network_directory }}/$(date +%Y-%m-%d-%H-%M-%S-gvswitch.log) &
+      changed_when: '"ALREADY RUNNING" not in start_network_command.stdout_lines'
+      register: start_network_command
+
+    ###
+    ### Cloud init
+    ###
+    - name: Generate openssh key pair
+      community.crypto.openssh_keypair:
+        path: "{{ molecule_private_key_path }}"
+        type: ecdsa
+        size: 384
+      register: ssh_key
+
+    - name: Create user-data from template
+      ansible.builtin.template:
+        src: user-data.j2
+        dest: "{{ molecule_ephemeral_directory }}/{{ item.name }}/user-data"
+      register: molecule_cloud_init_user_data_template
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+
+    - name: Create meta-data from template
+      ansible.builtin.template:
+        src: meta-data.j2
+        dest: "{{ molecule_ephemeral_directory }}/{{ item.name }}/meta-data"
+      register: molecule_cloud_init_meta_data_template
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+
+    - name: Create cloud-init iso file
+      ansible.builtin.command: |-
+        mkisofs \
+          -o "{{ molecule_ephemeral_directory }}/{{ item.name }}/cloud-init.iso" \
+          -V cidata -J -r \
+          user-data meta-data
+      args:
+        chdir: "{{ molecule_ephemeral_directory }}/{{ item.name }}"
+      when: "molecule_cloud_init_user_data_template.changed or molecule_cloud_init_meta_data_template.changed"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+
+    ###
+    ### Volume
+    ###
+    - name: Create root volumes
+      ansible.builtin.shell:
+        cmd: |-
+          cp "{{ item_image_location }}" "{{ molecule_ephemeral_directory }}/{{ item.name }}/root.qcow2"
+          qemu-img resize \
+            -q \
+            -f qcow2 \
+            --preallocation=metadata \
+            {{ molecule_ephemeral_directory }}/{{ item.name }}/root.qcow2 \
+            {{ item_disk_size }} \
+          || qemu-img resize \
+            -q \
+            -f qcow2 \
+            {{ molecule_ephemeral_directory }}/{{ item.name }}/root.qcow2 \
+            {{ item_disk_size }}
+        creates: "{{ molecule_ephemeral_directory }}/{{ item.name }}/root.qcow2"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+
+    ###
+    ### Firmware
+    ###
+    - name: Enrolling keys for UEFI secure boot support
+      ansible.builtin.shell:
+        cmd: |-
+          export VIRTUAL_ENV="$(realpath ../../.venv)"
+          export PATH="${VIRTUAL_ENV}/bin:$PATH"
+          virt-fw-vars \
+              --input "{{ item_uefi_firmware_vars_template }}" \
+              --output "{{ item_uefi_firmware_vars }}" \
+              --distro-keys windows \
+              --distro-keys ms-uefi \
+              --distro-keys rhel \
+              --distro-keys rh-uefi \
+              --distro-keys fedora \
+              --distro-keys centos \
+              --microsoft-kek all \
+              --secure-boot
+        creates: "{{ item_uefi_firmware_vars }}"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+      when: 'not ((item_uefi_firmware_code == "none") or (item_uefi_firmware_vars_template == "none"))'
+
+    ###
+    ### Instances
+    ###
+    - name: Define instances
+      community.libvirt.virt:
+        command: define
+        xml: "{{ lookup('template', templatefile) }}"
+        uri: "{{ libvirt_uri }}"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars:
+        <<: *x_instances_vars
+        templatefile: "instance.{{ host_os }}.xml.j2"
+
+    - name: Start instances
+      community.libvirt.virt:
+        name: "{{ item.name }}"
+        state: running
+        uri: "{{ libvirt_uri }}"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+
+    - name: Temporary add subordinaries
+      ansible.builtin.add_host:
+        hostname: "{{ item_name }}"
+        groups: ["subordinaries"]
+        ansible_host: "127.0.0.1"
+        ansible_port: "{{ item_bind_port }}"
+        ansible_user: "{{ molecule_ssh_user }}"
+        ansible_ssh_private_key_file: "{{ molecule_private_key_path }}"
+        ansible_ssh_common_args: -o StrictHostKeyChecking=no
+      changed_when: false
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+
+    - name: Wait for instances ready
+      ansible.builtin.command: |-
+        timeout 1 ssh \
+          -o UserKnownHostsFile=/dev/null \
+          -o StrictHostKeyChecking=no \
+          -i "{{ molecule_private_key_path }}" \
+          -p "{{ item_bind_port }}" \
+          "{{ molecule_ssh_user }}@127.0.0.1"
+      changed_when: false
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+      until: 'result.rc == 0'
+      register: result
+      retries: "{{ molecule_timeout }}"
+
+    - name: Populate instance configs
+      ansible.builtin.set_fact:
+        instance_conf_dict:
+          instance: "{{ item.name }}"
+          address: "127.0.0.1"
+          user: "{{ molecule_ssh_user }}"
+          port: "{{ item_bind_port }}"
+          identity_file: "{{ molecule_private_key_path }}"
+      loop: *x_instances_loop
+      loop_control: *x_instances_loop_control
+      vars: *x_instances_vars
+      register: instance_config_dict
+
+    - name: Dump instance config
+      copy:
+        content: "{{ instance_config_dict.results | map(attribute='ansible_facts.instance_conf_dict') | list | to_json | from_json | to_yaml }}"
+        dest: "{{ molecule_instance_config }}"
+        mode: '0600'

@@ -1,0 +1,12 @@
+###
+### Right after a node became capable to fulfill ansible actions,
+### we must configure it correspondingly to the organisation's
+### policies, such as security policy, observability policy, etc.
+### Policies are different across companies, but usually have the
+### similar goals. Here is an example of the playbook which enforces
+### "some typical" policy.
+###
+- hosts: all
+  strategy: free
+  roles:
+    - role: policies

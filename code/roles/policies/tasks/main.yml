@@ -1,0 +1,29 @@
+###
+### Policy: Required packages
+###
+- name: Install required packages
+  ansible.builtin.include_tasks: packages.yml
+
+###
+### Policy: NTP
+###
+- name: Configure NTP
+  ansible.builtin.include_tasks: ntp.yml
+
+###
+### Policy: Security patching
+###
+- name: Configure security updates
+  ansible.builtin.include_tasks: security_updates.yml
+
+###
+### Policy: SSH configuration
+###
+- name: Configure SSH
+  ansible.builtin.include_tasks: ssh.yml
+
+###
+### Policy: Firewall
+###
+- name: Firewall configuration
+  ansible.builtin.include_tasks: firewall.yml

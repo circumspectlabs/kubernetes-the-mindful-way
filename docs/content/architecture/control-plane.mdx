@@ -1,0 +1,429 @@
+import { Callout } from 'nextra/components';
+import Image from 'next/image';
+
+import { Plus, Minus } from "../../src/components/Icons";
+
+# Control Plane
+
+This topic explains the essential components of Kubernetes control plane,
+their behaviour, state machines, objects, configuration, best practices,
+and the most useful design implementations. It's a must-read for everyone
+involved to cluster administration and maintenance, and less helpful for
+just users and developers.
+
+## Glossary
+
+**Control Plane** is the service (set of applications) which manages all
+components of Kubernetes cluster, including nodes, workloads, services,
+manifests, etc. It is responsible ONLY for NATIVE Kubernetes logic (state
+machines), such as pod lifecycle, nodes registration, RBAC, etc.
+
+**Controller Layer** is more wide definition: it includes the whole
+control plane, operators, and external admission controllers.
+
+**Control Plane Node** is a Kubernetes node which rubs control plane
+components. Some implementations don't have such nodes: for example, AWS
+EKS don't have such nodes. But it doesn't mean that this cluster is a
+control-plane -less or masterless, because there are no clusters without
+control plane. See sections below for details.
+
+**Master Node** is the same Control Plane Node, just deprecated name.
+
+**Certificate Authority** is a set of digital cryptographic certificates
+with the same scope. Usually, it is one certificate-key pair (root
+certificate) signed by other CA (or self-signed). Other keys, signed by this
+root certificate and key, could be validated by root certificate, to ensure
+that this new certificate-key pair is "approved" by CA owner. Most of all
+modern cryptography is built on top of this approach. You can find more
+[by this link](https://en.wikipedia.org/wiki/Certificate_authority).
+
+<Callout type="info">
+Terms **"Control Plane"** and **"Controller Layer"** have the different
+scope: control plane is only about native Kubernetes logic, but controller
+layer includes control plane and all other controllers.
+</Callout>
+
+### Control Plane or Master
+
+Since the 1.20.x series, developers had to change terminology from "master"
+to "control-plane". This is the reason why now we have two terms and
+sometimes call these nodes "master". In 1.24.x, developers have removed
+the old "master" label in favor to "control-plane". For many engineering
+teams the migration process was terrible (some seniors even had the same
+PTSD for PostgreSQL), because of node label `node-role.kubernetes.io/master`
+to `node-role.kubernetes.io/control-plane` change.
+
+It means that the right definition is "Control Plane", but "Master" is
+still very commonly used term.
+
+## Components
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/control_plane.png" alt="Kubernetes components and their relations diagram" width={500} height={500}/>
+  <span style={{ marginTop: "0.3rem", width: 500, textAlign: "center", color: "gray" }}>Component diagram of Kubernetes control plane. Please note mTLS and TLS marks only represent the recommended protocols, the exact protocol might depend on configuration.</span>
+</div>
+
+### API
+
+This component is a server application, responsible to directly communicate
+with etcd, create/read/write/update/delete objects (by manifests), allows
+subscribing for changes in objects ("watch" call), controls access to objects,
+communicates with admission controllers (by webhooks configured with
+`ValidationAdmissionWebhooks` and `MutationAdmissionWebhooks` objects), and
+communicates with cloud controllers (if enabled, but rarely used for
+on-premise clusters).
+
+Practically, to set up the secure control plane, you need to use a few
+separated certificate authorities. You cannot use only one for everything
+because of security considerations. You can find more about exact Kubernetes
+usage of CA in [Certificate Authorities](/en/security/certificate-authorities)
+topic.
+
+These components are absolutely stateless. You can run any number of these
+components, it has no conflicting logic. It's not necessary to run more
+than two replicas of this application in different failure domains, but
+it's common to run more, because practically this component deployed with
+etcd member, and etcd cluster requires odd number of members (3 replicas
+of API component).
+
+Component's full name: `kube-apiserver`.
+
+Configuration documentation: [CLI](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
+
+#### Intercommunication
+
+* Almost every Kubernetes component directly or indirectly communicates with
+this API. It makes this component the main component of the whole Kubernetes
+cluster. This API must be reachable by all Kubernetes components, including
+whole control plane, operators, admission controllers, CNI, CSI, CRI, etc.
+
+* It directly communicates to `kubelet` by :10250, for different scenarios
+such as container attach, port forwarding, requests proxying, status checks,
+etc. See `pods/*` API calls.
+
+* It directly communicates with admission controllers, announced with
+`ValidationAdmissionWebhooks` and `MutationAdmissionWebhooks` objects.
+Following to the configuration in these objects, API will try to establish
+connection with the pods with admission controller (via service). To make
+admission controllers working, you must ensure that admission controllers
+are reachable by API component.
+
+* It directly comminucates with cloud controller. For example, it can create
+AWS ALB as response to creation of a `Service` object with `LoadBalancer`
+type.
+
+#### Behavior
+
+* Listens on `0.0.0.0:6443` address (by default, defined by `--bind-address` and
+`--secure-port` args). This API exposes CRUD for all objects within the cluster.
+It has different implementations for authentication and authorization (including
+RBAC).
+
+* On the same `0.0.0.0:6443` listener, you can find `/metrics` route with
+Prometheus metrics. This route is restricted (if authentication enabled). The
+list of metrics here is not so helpful (only clarifies internal operation of
+the component), consider to use other exporters for objects.
+
+* It directly communicates with etcd, and it's only service which need access
+to this dependency.
+
+* It's very insecure exposing API component to internet, because it can respond
+even without client TLS certificate (without mutual TLS). However, it's usually
+safe to expose API to internet via TLS proxy with mTLS requirements.
+
+### Controller Manager
+
+This component is a client application, responsible for handling state
+machines around components available in API component. It watches for
+objects and modifies their state. For example, modifies Pod from
+"Pulling" to "Init" state as soon as it identifies that the image has
+been pulled.
+
+It listens on `:10257` port, but it's only metrics and healthcheck
+endpoints. Both endpoints are restricted (if authentication enabled).
+
+<Callout type="info">
+The official documentation states that `:10257` port must be reachable by
+all components of the cluster, but it's not true. This route must be
+reachable only by metrics scraper (like Prometheus server). However,
+these metrics have almost no practical application.
+</Callout>
+
+This is also stateless component, but it uses Lease objects to control
+which exact replica is working. Samewise as for API component, it doesn't
+have to have more than 2 replicas in different failure domains, but
+practically runs near every API replica (which usually runs near every
+etcd member).
+
+This component directly communicates only with API component. It's a sort
+of asynchronous "worker" for API component.
+
+Component's full name: `kube-controller-manager`.
+
+Configuration documentation: [CLI](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-controller-manager/)
+
+### Scheduler
+
+This component is a client application, responsible for distributing
+pods by nodes. Kubernetes may have more than one scheduler, but this one
+is default.
+
+It listens on `:10259` port, but it's only metrics and healthcheck
+endpoints. Both endpoints are restricted (if authentication enabled).
+
+<Callout type="info">
+Same mistake, `:10259` port don't have to be reachable by anything except
+metrics scraper (like Prometheus server). And these metrics are also quite
+useless.
+</Callout>
+
+Same as controller manager and API, this is a stateless component, and it
+uses Lease objects to control which exact replica is working. 2 replicas
+are useful, can run more in case of allocation near every etcd member.
+
+This component directly communicates only with API component. It's a sort
+of asyncronous "worker" for API component.
+
+Component's full name: `kube-scheduler`.
+
+Configuration documentation: [CLI](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-scheduler/)
+
+### DNS
+
+This component is a special application, both client (of API) and server
+(serves DNS requests). This is the default DNS server for all workloads
+in the cluster. It is responsible for discovery in the cluster, making
+Services available by DNS request.
+
+Long time ago, there was a service `kube-dns` (deeply deprecated), but it
+has been replaced by `coredns` with kubernetes plugin. Cluster
+administrators still can choose any other DNS component implementation,
+but practically `coredns` with the plugin is a standard.
+
+The typical workflow of this component:
+
+1. Requests and watches for changes in Pods, Services, Endpoints,
+EndpointSlices objects (from API).
+2. Caches these responses for later use.
+3. In case of DNS query for the corresponding FQDN, it answers with the IP
+address from the corresponding object's manifest (i.e. `.spec.ClusterIP`
+for Service objects).
+
+This component is stateless. Practically, you must run this component
+WITHIN the Kubernetes, as a cluster's workload. It's recommended to run at
+least 2 replicas of this component, and the number must grow with the load.
+You can measure load by metrics, available on `:9153` port.
+
+This is a sort of "deplayed" components. This means that this component
+can be started a bit later than other components of the control plane.
+Since this component is running in the cluster, you must have at least one
+ready node. Practically, nodes aren't ready until you have installed CNI,
+thus it's normal having this component unready (in "Pending" state) until
+you deploy kubernetes nodes and CNI.
+
+ALthough it is an optional component, the discovery feature is one of the
+most useful in Kubernetes clusters. If this component doesn't work, most
+likely the entire cluser has some kind of disrution. It's very important
+to enable monitoring and alerting for this component. If this component
+doesn't work, your nodes are still in "Ready" state.
+
+Component's full name: `coredns` by default, could be replaced.
+
+Configuration documentation: [Configuration](https://github.com/coredns/coredns.io/blob/master/content/manual/configuration.md)
+
+### Metrics Server
+
+This is a special application which directly communicates with kubelets
+and API, and API directly communicates with it. This component exposes
+containers' resource metrics (like cpu and memory consumption) for API.
+The command `kubectl top` depends on this component. Controller manager
+depends on this service for HPA.
+
+This component is optional (but strongly recommended), "delayed", and
+usually runs in a Kubernetes cluster.
+
+The typical workflow of this component:
+
+1. Gets list of Node objects from API.
+2. Periodiacally requests containers' resource metrics directly from
+kubelets and caches the response.
+3. Exposes cached metrics for API and users.
+
+<Callout type="info">
+To enable this component, you need to use a rare and barely-documented
+kind APIService. Long story short, it allows to expand the existing
+API with an extra routes and features.
+</Callout>
+
+This component is stateless. Since it is a little feature for `kubectl
+top`, it's not necessary to have more than one replica of this service.
+
+<Callout type="warning">
+This service has direct access to kubelets, thus be careful with the
+configuration of this service (it may expose TLS certificates with
+access to kubelets, avoid using it in ConfigMaps and/or Secrets).
+</Callout>
+
+Component's full name: `metrics-server`, but the component may abcent.
+
+Configuration documentation: [README.md](https://github.com/kubernetes-sigs/metrics-server)
+
+## Implementations
+
+For on-premise clusters, it's unusual having really different
+configuration. Most of all cluster deploy automations has some
+pre-defined design. For example, `kubeadm` (most known clusters
+bootstrapping utility) deploys control plane nodes with control plane
+components as static pods, including even etcd. In the most simple
+cases, it is enough for small clusters and small companies without
+large policies and SLA agreements. However, cloud vendors like AWS,
+GCP, and Azure, prefer to run control plane components separately, and
+it even provides a few advancements.
+
+Here are three typical scenarios:
+* Running control plane components on the control plane nodes in static
+pods.
+* Running control plane components on the control plane nodes without
+static pods (this is particularly uncovered in [The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way)).
+* Running control plane components separately and independently from
+cluster nodes (no control plane nodes).
+
+### Control Plane Nodes with Static Pods
+
+This type of clusters is common for `kubeadm` deployments.
+
+In that case, you have a cluster with odd number of nodes with
+`node-role.kubernetes.io/control-plane:NoSchedule` taint and
+`node-role.kubernetes.io/control-plane=true` label (if has 1.20+
+version). Every such node has a few static pods with the components
+and dependencies of the control plane: etcd, api, controller-manager,
+scheduler. It may have other pods with critical components, but they
+are most likely non-static.
+
+Static pod is a kind of pods which deployed by kubelet independently
+from the control plane. Kubelet can be configured to watch the directory
+with pod manifests and deploys these manifests even before connection to
+the control plane. It was introduced for convenience, however it is
+brings some security risk (read more about this in [Security Threat
+Model](/en/threat-model/control-plane)).
+
+The main reason to choose this way is simplicity and template-based
+maintenance automation. It is a good start, but for big and fancy
+clusters, you will quickly unrestand that it has a few significant
+design problems.
+
+The advantages and disadvantages:
+* <Plus/> Simple and pretty fast to bootstrap. Useful for non-production
+environments, may be used for production too (very carefully!).
+* <Plus/> Requires only nodes for control plane and nothing else (no
+extra dependencies).
+* <Plus/> Some automation of cluster upgrade (practically it's quite
+dangerous).
+* <Minus/> Must use 3 nodes for the minimal redundancy because of etcd
+* <Minus/> Controller manager nodes become stateful (because of the
+content of etcd member pods). And you cannot configure external volumes,
+you have to run it with hostPath volumes.
+* <Minus/> Automation may overwrite your changes in static pods.
+* <Minus/> Control plane is directly accessible by the control plane
+nodes workloads. In case of compromentation of your cluster, you hardly
+can isolate the scope of breach.
+
+<Callout type="info">
+Security researchers, when see this type of clusters, always must look
+into kubeadm artifacts and vulnerabilities. This is a plenty of
+misconfigurations and even expoloits for this typical pattern, even
+trivial ones.
+</Callout>
+
+### Control Plane Nodes with Systemd
+
+This is more mature deployment which fits to more mature companies. In
+this deployment, you virtually separate the control plane components
+from the node components. It allows running control plane without
+containerization and it's dependencies, and you can still use systemd
+restrictions such as sandboxing, isolation, chroot, etc.
+
+This kind of deployments usually has the simpler maintenance procedures.
+For example, it's simpler to implement downtime-less control plane
+upgrade (including minor version upgrades). In addition, it allows to
+enable more security segregation between the control plane and other
+components (i.e. you can enable firewall with process pinning based on
+`iptables -m owner`, or even enable very restrictive apparmor and
+selinux profiles independently from CRI). All of it is useful in terms
+of security, because the control plane node has direct access at least
+to etcd and service account authority key. Thus, the comprometation of
+the control plane node means the comprometation of at least the whole
+cluster (and usually the etcd cluster too which is even more painful
+when you use the same etcd for staging, development, and production
+environments).
+
+The advantages and disadvantages:
+* <Plus/> Not so simple to bootstrap, but gives more flexibility. Useful for
+simple production (again, very carefully!).
+* <Plus/> Requires only nodes for control plane and nothing else (no
+extra dependencies).
+* <Plus/> A way easier to write automation for this (i.e. with Ansible or bash
+scripts).
+* <Plus/> Possible to separate the etcd cluster, or still must use at least 3
+nodes for the minimal redundancy.
+* <Minus/> Requires a way more profficient Kubernetes engineers.
+* <Minus/> Controller manager nodes are still stateful and the most vulnerable
+part of the cluster.
+* <Minus/> Control plane is directly accessible by the control plane
+nodes workloads. In case of compromentation of your cluster, you hardly
+can isolate the scope of breach.
+
+<Callout type="info">
+Security researchers, when don't see the control plane components in the
+cluster (the corresponding pods in `kube-system` namespace) but detect
+the control plane's labels on some nodes, will immediately try to steal
+PKI and secrets with `hostPath` or `hostNetwork`. If no luck, they will
+definitely try to use some vulnerabilities of the current Kubernetes
+version. This also works good for the static-pods-based deployment.
+</Callout>
+
+### Separate Control Plane (Cloud Way)
+
+This is the most mature, most reliable, most felxible, and most secure way
+to run your control planes. This is the main reason why the author wrote
+this book :)
+
+In that case, you host all components separately from the cluster's
+workloads. Usually it means the separated virtual or physical machines,
+in the separated network, most likely with the access level. The proper
+implementation of this design allows to keep your secrets and PKIs safe
+even in case of comprometation of the whole cluster.
+
+This is usually quite challenging to implement the proper networking
+between control plane and nodes, here is the list of required network
+access:
+
+* `TCP:6443` connections from nodes to control plane.
+* `TCP:10250` connections from control plane to nodes.
+* `UDP:53` connections from control plane to kube-dns service IP. Or you can
+run an extra coredns instance right near the control plane and forward DNS
+requests into there.
+* `TCP:*` connections from control plane to pods and services. You can also
+implement dynamic whitelisting by watching *AdmissionWebhook and APIService
+objects.
+
+The advantages and disadvantages:
+* <Plus/> The most secure, flexible, and maintenance-friendly way to host
+control plane. Seamlessly fits to any compliance program.
+* <Plus/> Allows to properly segregate responsibility between platform and
+DevOps teams.
+* <Plus/> Practically, with this deployment, almost all maintenance is
+automated, including control plane upgrades, auto-healing, and security
+patching.
+* <Plus/> Fits to LARGE companies, because able to fullfil their business
+requirements (especially security and development velocity) and costs
+resources.
+* <Plus/> Simple for developers, devops, and basic security engineers.
+* <Minus/> Complex for architects and platform engineers.
+
+## Quick Summary
+
+The most complex part is behind! Now you know how different companies build
+their clusters depending on their use case and requirements. And now might
+be able to build your own managed Kubernetes cluster for your in-house
+development platform.

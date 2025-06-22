@@ -1,0 +1,39 @@
+version = 2
+oom_score = -900
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+  uid = 0
+  gid = {{ containerd_gid }}
+
+[plugins]
+  [plugins."io.containerd.cri.v1.cri"]
+    systemd_cgroup = true
+    [plugins."io.containerd.cri.v1.cri".containerd]
+      default_runtime_name = "runc"
+      [plugins."io.containerd.cri.v1.cri".containerd.runtimes]
+        ###
+        ### Runc - default runtime
+        ###
+        [plugins."io.containerd.cri.v1.cri".containerd.runtimes.runc]
+          runtime_type = "io.containerd.runc.v2"
+          sandbox_mode = "podsandbox"
+          [plugins."io.containerd.cri.v1.cri".containerd.runtimes.runc.options]
+            BinaryName = "{{ binary_runc }}"
+            SystemdCgroup = true
+{% if containerd_nvidia_runtime %}
+        ###
+        ### Nvidia runc - runtime with nvidia capabilities
+        ###
+        [plugins."io.containerd.cri.v1.cri".containerd.runtimes.nvidia]
+          runtime_type = "io.containerd.runc.v2"
+          sandbox_mode = "podsandbox"
+          privileged_without_host_devices = false
+          runtime_engine = ""
+          runtime_root = ""
+          [plugins."io.containerd.cri.v1.cri".containerd.runtimes.nvidia.options]
+            BinaryName = "{{ binary_nvidia_runc | default('/usr/bin/nvidia-container-runtime') }}"
+            SystemdCgroup = true
+{% endif %}
