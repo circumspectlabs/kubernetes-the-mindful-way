@@ -9,6 +9,7 @@ import { themeColorSettings } from "../theme";
 import { site, vendor, base, locale, license } from "../settings";
 
 export const metadata = {
+  metadataBase: new URL(site.url),
   title: {
     default: site.name,
     template: `%s | ${site.name}`,
@@ -18,17 +19,17 @@ export const metadata = {
     siteName: site.name,
     locale: locale,
     type: "website",
+    images: "/opengraph-image"
   },
 };
 
-const banner = <Banner storageKey="pre-release">This is a pre-release version. Please watch for the updates!</Banner>;
-
-const navbar = (
-  <Navbar
-    logo={Logo()}
-    projectLink={base.project}
-  />
+const banner = (
+  <Banner storageKey="pre-release">
+    This is a pre-release version. Please watch for the updates!
+  </Banner>
 );
+
+const navbar = <Navbar logo={Logo()} projectLink={base.project} />;
 
 const sidebar = {
   autoCollapse: false,
@@ -53,13 +54,8 @@ const footer = (
 
 export default async function RootLayout({ children }) {
   return (
-    <html
-      lang="en"
-      dir="ltr"
-      suppressHydrationWarning
-    >
-      <Head color={themeColorSettings}>
-      </Head>
+    <html lang="en" dir="ltr" suppressHydrationWarning>
+      <Head color={themeColorSettings}></Head>
       <body>
         <Layout
           darkMode={true}

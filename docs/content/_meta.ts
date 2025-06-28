@@ -33,6 +33,6 @@ export default {
     type: "separator",
   },
   contact: {
-    title: "Contact Me",
+    title: "Contact Us",
   },
 };
