@@ -21,13 +21,12 @@ export const metadata = {
   },
 };
 
-const banner = <Banner storageKey="1.0-release">We've finaly released!</Banner>;
+const banner = <Banner storageKey="pre-release">This is a pre-release version. Please watch for the updates!</Banner>;
 
 const navbar = (
   <Navbar
     logo={Logo()}
     projectLink={base.project}
-    children={undefined}
   />
 );
 

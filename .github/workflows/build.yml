@@ -1,0 +1,49 @@
+name: Build and Release
+on:
+  push:
+    branches:
+      - 'ci/**'
+    tags:
+      - v**
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: '>=24.0.0'
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          clean: true
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Configure pages
+        uses: actions/configure-pages@v5
+      - name: Build
+        shell: bash
+        working-directory: ./docs
+        run: |-
+          npm install
+          npm run build
+          npm run postbuild
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        id: deployment
+        with:
+          path: docs/dist
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{steps.deployment.outputs.page_url}}
+    needs: build
+    steps:
+      - name: Publish
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -5,5 +5,12 @@ const withNextra = nextra({
 });
 
 export default withNextra({
+  // build
+  output: 'export',
+  images: {
+    unoptimized: true
+  },
+  distDir: "dist",
+  // settings
   devIndicators: false,
 });
