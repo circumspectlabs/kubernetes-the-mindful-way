@@ -1,7 +1,10 @@
+---
+details: "The article explains the common system patterns, applied in the Kubernetes ecosystem."
+---
 # Smart Objects Storage
 
 This article explains another pattern applied in Kubernetes. Same as for
-[Finite State Machines](/en/essentials/finite-state-machines), this article
+[Finite State Machines](/essentials/finite-state-machines), this article
 will be helpful for every engineer who works with Kubernetes.
 
 ---
@@ -20,7 +23,7 @@ For Kubernetes, every manifest (like for Pod, Deployment, Node, NetworkPolicy,
 etc.) is a presentation of an object.
 
 * There are finite state machines which control the state and sometimes the
-attributes of an object. Please read more about finite state machines in [another topic](/en/essentials/finite-state-machines).
+attributes of an object. Please read more about finite state machines in [another topic](/essentials/finite-state-machines).
 Every machine can work with one or more objects and perform actions. The main
 purpose of these machines is syncing the state of the objects (i.e. pod status)
 with the actions (i.e. deploying a pod, or horizontal scaling of a deployment).

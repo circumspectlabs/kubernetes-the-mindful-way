@@ -1,3 +1,6 @@
+---
+description: "The article reveals internals of Admission Controller in Kubernetes, including validating and mutating webhooks, use cases, and the embedded admission policy engine."
+---
 # Admission Controller
 
 Admission Controller of the Kubernetes is one of the most interesting features
@@ -140,7 +143,7 @@ admission controller.
 Since Kubernetes `Secret`s aren't secrets actually (because just only
 base64-encoded binary data), one day enterprise starts thinking about more
 secure approach to store secrets for Kubernetes-located workloads. One of the
-options, it enabling secure secrets storage (Vault for this example) and
+options, is enabling secure secrets storage (Vault for this example) and
 automate secrets provisioning into pods. With the secrets injector, you can
 provision secrets without disclosing it on the Kubernetes API level. Only the
 configured Pod is able to read/use the provisioned secret. Of course, it uses
@@ -283,6 +286,6 @@ controller engine, it's not that difficult.
 ## Quick Summary
 
 Admission Controller is one of the features of Kubernetes, that everyone use or
-used, but not too many know how it really work. Welcome to the family, now you
-know what it is, how it work, how to use it, and the most useful is how to fix
+used, but not too many know how it really works. Welcome to the family, now you
+know what it is, how it works, how to use it, and the most useful is how to fix
 that in case of issues.

@@ -1,11 +1,14 @@
+---
+description: "The article contains the essential knowledge about Kubernetes nodes, necessaary for designing Kubernetes nodes in hybrid and on-premise environments."
+---
 import { Callout } from 'nextra/components';
 import Image from 'next/image';
 
 # Node
 
-After the [Control Plane Design](/en/grand-design/control-plane) article,
+After the [Control Plane Design](/architecture/control-plane) article,
 you already know that nodes are deeply integrated with the control planes.
-It's sequential to dig deepers into how Kubernetes nodes work.
+It's sequential to dig deeper into how Kubernetes nodes work.
 
 This is a must-read for everyone involved to cluster administration and
 maintenance, however still might be helpful for just users and developers,
@@ -45,7 +48,7 @@ management, and mounting volumes and filesystems.
 ### Kubelet
 
 Kubelet is the main component of any Kubernetes node. It registers in the
-control plane, creates the Node object in API, and syncronizes the state
+control plane, creates the Node object in API, and synchronizes the state
 of this object with the actual state of the node.
 
 In difference to the control plane components, kubelets (as well as
@@ -70,10 +73,10 @@ It becomes more complex when something goes wrong with your node. We can
 explicitly configure this behaviour, readiness timeout, and other related
 counters.
 
-Every `nodeStatusUpdateFrequency` (diration: `10s`) the kubelet performs
+Every `nodeStatusUpdateFrequency` (duration: `10s`) the kubelet performs
 different checks of CPU, memory, IO stats, network, and other metrics,
 and reports to API of something has been changed. In addition, it also
-reports to API every `nodeStatusReportFrequency` (diration: `5m`) even
+reports to API every `nodeStatusReportFrequency` (duration: `5m`) even
 if no changes happened.
 
 The more important question here is how API identifies that the node is
@@ -89,7 +92,7 @@ cannot make node unready (if it doesn't disrupt the node).
 
 #### Eviction
 
-Eviction is a specific process of kubelet which allows to keep node
+Eviction is a specific process of kubelet which allows keeping node
 stable and performant. There are two types of eviction: `soft` and `hard`.
 Long story short, they evict pods from nodes at some specific conditions.
 You can manage the behavior of this process with config parameters. Read
@@ -127,7 +130,7 @@ necessary to define it (e.g. if you run Kubernetes node in a container
 environment).
 
 Unexpectedly, this component only communicates with API (of the control
-plane), it doesn't request to kubelet port and has it's own kubeconfig.
+plane), it doesn't request to kubelet port and has its own kubeconfig.
 
 It's not preferable to significantly change the configuration of this
 component from default setting, because it may change the behavior of
