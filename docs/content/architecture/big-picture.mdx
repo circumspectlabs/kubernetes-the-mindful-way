@@ -1,9 +1,12 @@
+---
+description: "The article reveals the detailed architecture of the Kubernetes systems, with attention to context-specific details for cloud-managed, self-hosted, reliable, and secure cluster implementations."
+---
 import { Callout } from 'nextra/components';
 import Image from 'next/image';
 
 # Big Picture
 
-The article reveals the exact architecture of the Kubernetes systems, with
+The article reveals the detailed architecture of the Kubernetes systems, with
 attention to context-specific details for cloud-managed, self-hosted, reliable,
 and secure cluster implementations. It's a must-read for everyone involved to
 cluster administration, maintenance, development, and usage. In other words,
@@ -21,12 +24,12 @@ components:
 * **Control plane** (previously known as "master"). This group of components is
 a crucial part of the cluster and responsible for the management of resources in
 the cluster. In other words, it implements the exact "Smart Objects Storage"
-pattern. See details in the [Control Plane](/en/grand-design/control-plane)
+pattern. See details in the [Control Plane](/architecture/control-plane)
 article.
 
 * **Node** (previously known as "worker"). This group of components is
 responsible for running workloads in the way configured by resources in the
-cluster. See details in the [Node](/en/grand-design/node) article.
+cluster. See details in the [Node](/architecture/node) article.
 
 * **Etcd**. This is the only dependency of a Kubernetes cluster. Most of all cases
 this deployment physically located on the same nodes as the control plane. However,
@@ -55,12 +58,12 @@ There also some useful facts about etcd relatively to Kubernetes:
 on the same nodes. It might be a separated service in another physical location
 (even managed by another team).
 * It's possible to run MULTIPLE Kubernetes clusters on the same etcd cluster.
-Surely, it makes this etcd deployment more complex if you still want to ensure
-the security and performance of this etcd cluster. See `--etcd-prefix` flag of
+Surely, it makes this etcd deployment more complex if you still want to be confident
+about the security and performance of this etcd cluster. See `--etcd-prefix` flag of
 [kubeapi](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
 component.
 * It's possible to run different kinds of applications on the same etcd cluster
-(i.e. Kubernetes and Patroni). Of course, not recommended die to different load
+(i.e. Kubernetes and Patroni). Of course, it's not recommended due to different load
 patterns (may cause performance issues in future). See `--etcd-prefix` flag of
 [kubeapi](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
 component.

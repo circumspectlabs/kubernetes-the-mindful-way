@@ -1,3 +1,6 @@
+---
+description: "This topic explains the essential components of Kubernetes control plane, their behavior, state machines, objects, configuration, best practices, and the most useful design implementations."
+---
 import { Callout } from 'nextra/components';
 import Image from 'next/image';
 
@@ -6,7 +9,7 @@ import { Plus, Minus } from "../../src/components/Icons";
 # Control Plane
 
 This topic explains the essential components of Kubernetes control plane,
-their behaviour, state machines, objects, configuration, best practices,
+their behavior, state machines, objects, configuration, best practices,
 and the most useful design implementations. It's a must-read for everyone
 involved to cluster administration and maintenance, and less helpful for
 just users and developers.
@@ -76,7 +79,7 @@ on-premise clusters).
 Practically, to set up the secure control plane, you need to use a few
 separated certificate authorities. You cannot use only one for everything
 because of security considerations. You can find more about exact Kubernetes
-usage of CA in [Certificate Authorities](/en/security/certificate-authorities)
+usage of CA in [Certificate Authorities](/security/certificate-authorities)
 topic.
 
 These components are absolutely stateless. You can run any number of these
@@ -108,7 +111,7 @@ connection with the pods with admission controller (via service). To make
 admission controllers working, you must ensure that admission controllers
 are reachable by API component.
 
-* It directly comminucates with cloud controller. For example, it can create
+* It directly communicates with cloud controller. For example, it can create
 AWS ALB as response to creation of a `Service` object with `LoadBalancer`
 type.
 
@@ -214,16 +217,16 @@ WITHIN the Kubernetes, as a cluster's workload. It's recommended to run at
 least 2 replicas of this component, and the number must grow with the load.
 You can measure load by metrics, available on `:9153` port.
 
-This is a sort of "deplayed" components. This means that this component
+This is a sort of "delayed" components. This means that this component
 can be started a bit later than other components of the control plane.
 Since this component is running in the cluster, you must have at least one
 ready node. Practically, nodes aren't ready until you have installed CNI,
 thus it's normal having this component unready (in "Pending" state) until
 you deploy kubernetes nodes and CNI.
 
-ALthough it is an optional component, the discovery feature is one of the
+Although it is an optional component, the discovery feature is one of the
 most useful in Kubernetes clusters. If this component doesn't work, most
-likely the entire cluser has some kind of disrution. It's very important
+likely the entire cluster has some kind of disruption. It's very important
 to enable monitoring and alerting for this component. If this component
 doesn't work, your nodes are still in "Ready" state.
 
@@ -235,7 +238,7 @@ Configuration documentation: [Configuration](https://github.com/coredns/coredns.
 
 This is a special application which directly communicates with kubelets
 and API, and API directly communicates with it. This component exposes
-containers' resource metrics (like cpu and memory consumption) for API.
+containers' resource metrics (like CPU and memory consumption) for API.
 The command `kubectl top` depends on this component. Controller manager
 depends on this service for HPA.
 
@@ -245,7 +248,7 @@ usually runs in a Kubernetes cluster.
 The typical workflow of this component:
 
 1. Gets list of Node objects from API.
-2. Periodiacally requests containers' resource metrics directly from
+2. Periodically requests containers' resource metrics directly from
 kubelets and caches the response.
 3. Exposes cached metrics for API and users.
 
@@ -264,7 +267,7 @@ configuration of this service (it may expose TLS certificates with
 access to kubelets, avoid using it in ConfigMaps and/or Secrets).
 </Callout>
 
-Component's full name: `metrics-server`, but the component may abcent.
+Component's full name: `metrics-server`, but the component may be skipped.
 
 Configuration documentation: [README.md](https://github.com/kubernetes-sigs/metrics-server)
 
@@ -285,7 +288,7 @@ Here are three typical scenarios:
 pods.
 * Running control plane components on the control plane nodes without
 static pods (this is particularly uncovered in [The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way)).
-* Running control plane components separately and independently from
+* Running control plane components separately and independently of
 cluster nodes (no control plane nodes).
 
 ### Control Plane Nodes with Static Pods
@@ -294,22 +297,22 @@ This type of clusters is common for `kubeadm` deployments.
 
 In that case, you have a cluster with odd number of nodes with
 `node-role.kubernetes.io/control-plane:NoSchedule` taint and
-`node-role.kubernetes.io/control-plane=true` label (if has 1.20+
+`node-role.kubernetes.io/control-plane=true` label (if it has 1.20+
 version). Every such node has a few static pods with the components
-and dependencies of the control plane: etcd, api, controller-manager,
+and dependencies of the control plane: etcd, API, controller-manager,
 scheduler. It may have other pods with critical components, but they
 are most likely non-static.
 
 Static pod is a kind of pods which deployed by kubelet independently
-from the control plane. Kubelet can be configured to watch the directory
+of the control plane. Kubelet can be configured to watch the directory
 with pod manifests and deploys these manifests even before connection to
 the control plane. It was introduced for convenience, however it is
 brings some security risk (read more about this in [Security Threat
-Model](/en/threat-model/control-plane)).
+Model](/threat-model/landscape)).
 
 The main reason to choose this way is simplicity and template-based
 maintenance automation. It is a good start, but for big and fancy
-clusters, you will quickly unrestand that it has a few significant
+clusters, you will quickly understand that it has a few significant
 design problems.
 
 The advantages and disadvantages:
@@ -325,8 +328,8 @@ content of etcd member pods). And you cannot configure external volumes,
 you have to run it with hostPath volumes.
 * <Minus/> Automation may overwrite your changes in static pods.
 * <Minus/> Control plane is directly accessible by the control plane
-nodes workloads. In case of compromentation of your cluster, you hardly
-can isolate the scope of breach.
+nodes workloads. In case of compromentation of your cluster, it will be
+more difficult to isolate the scope of breach.
 
 <Callout type="info">
 Security researchers, when see this type of clusters, always must look
@@ -348,8 +351,8 @@ For example, it's simpler to implement downtime-less control plane
 upgrade (including minor version upgrades). In addition, it allows to
 enable more security segregation between the control plane and other
 components (i.e. you can enable firewall with process pinning based on
-`iptables -m owner`, or even enable very restrictive apparmor and
-selinux profiles independently from CRI). All of it is useful in terms
+`iptables -m owner`, or even enable very restrictive AppArmor and
+SELinux profiles independently of CRI). All of it is useful in terms
 of security, because the control plane node has direct access at least
 to etcd and service account authority key. Thus, the comprometation of
 the control plane node means the comprometation of at least the whole
@@ -401,10 +404,10 @@ access:
 * `TCP:6443` connections from nodes to control plane.
 * `TCP:10250` connections from control plane to nodes.
 * `UDP:53` connections from control plane to kube-dns service IP. Or you can
-run an extra coredns instance right near the control plane and forward DNS
+run an extra CoreDNS instance right near the control plane and forward DNS
 requests into there.
 * `TCP:*` connections from control plane to pods and services. You can also
-implement dynamic whitelisting by watching *AdmissionWebhook and APIService
+implement dynamic whitelisting by watching `*AdmissionWebhook` and `APIService`
 objects.
 
 The advantages and disadvantages:
@@ -415,7 +418,7 @@ DevOps teams.
 * <Plus/> Practically, with this deployment, almost all maintenance is
 automated, including control plane upgrades, auto-healing, and security
 patching.
-* <Plus/> Fits to LARGE companies, because able to fullfil their business
+* <Plus/> Suites to LARGE companies, because able to fulfil their business
 requirements (especially security and development velocity) and costs
 resources.
 * <Plus/> Simple for developers, devops, and basic security engineers.

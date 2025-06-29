@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from "next/link";
 import { FC, SVGProps } from "react";
 import { NotFoundPage } from "nextra-theme-docs";
 import { FaArrowRight } from "react-icons/fa";
@@ -433,7 +433,7 @@ const NotFound = () => {
           >
             {"To Index \u00a0"}
             <span className="inline-block inherit">
-              <FaArrowRight size={12}/>
+              <FaArrowRight size={12} />
             </span>
           </Link>
         </div>

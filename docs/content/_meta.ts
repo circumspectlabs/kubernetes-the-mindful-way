@@ -2,9 +2,6 @@ export default {
   index: {
     title: "About the Book",
   },
-  // howto: {
-  //   title: "How to Read This Book",
-  // },
   "---1": {
     type: "separator",
   },
@@ -36,6 +33,6 @@ export default {
     type: "separator",
   },
   contact: {
-    title: "Contact Me",
+    title: "Contact Us",
   },
 };
