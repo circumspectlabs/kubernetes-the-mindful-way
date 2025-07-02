@@ -1,6 +1,289 @@
 ---
-description: "TODO"
+description: "This article explains Kubernetes Operator pattern, how and when to use it, and even how to implement your own operator."
 ---
+import { Callout } from 'nextra/components';
+
 # Operators
 
-TODO
+Everyone who at least tried Kubernetes heard about operators. There is a plenty
+of them, for different needs, sizing, etc. To decide what operators to use in
+your cluster, you have to understand how it works. This page should set things
+by their places and maybe explain how (and when) to implement your own operator.
+
+The article is a must-read for every software engineer and architect involved
+into the development and maintenance of Kubernetes systems. This topic should be
+especially useful if you are going to develop your own Kubernetes operator.
+
+## Objects
+
+Every feature of Kubernetes has its own set objects or at least some
+configuration parameters. However, Kubernetes Operators isn't a part of
+Kubernetes, this it's usually some "external and deeply integrated
+functionality".
+
+Operators is the specific pattern which enables some additional logic for your
+cluster. As a pattern, it has no specific objects, but as an implementation,
+it practically relies upon additional objects. You can specify such objects
+with `CustomResourceDefinition`. It is another manifest, which allows you
+enabling additional manifests in Kubernetes API. By the [Smart Objects Storage](/essentials/smart-objects-storage)
+pattern, these objects also have some [State Machines](/essentials/finite-state-machines),
+implemented in the operator's logic.
+
+### CRDs
+
+It's usual that operators heavily rely upon `CustomResourceDefinition`s,
+because operators usually need to store their state. For example, for advanced
+management of volumes, it's usually not enough to use `PersistentVolumes` and
+`PersistentVolumeClaims`, the operator might need to add extra objects that
+define snapshots, checkpoints, replication rules, encryption keys configuration,
+etc.
+
+<Callout type="info">
+Operator workloads are usually stateless, because it's the most simple way to
+ensure that your can freely upgrade/evict/restart contolling pods.
+</Callout>
+
+To enable some custom resource, you need to create `CustomResourceDefinition`
+object, and then you can create the objects declared in the `CRD`. You can
+optionally specify OpenAPI schema for automated validation of the object. When
+you create `CRD`, it expands the exiting list of available APIs with the new
+objects. Keep in mind that objects are useless without the logic what handles
+them. For example, when you configure `ServiceMonitor` for scraping from some
+pods, it does nothing until you install Prometheus Operator. Practically,
+`CRD` manifests usually come with the helm charts of operators, you rarely need
+to manage it separately.
+
+### APIService
+
+Did you ever think how Kubernetes API service works internally, as a software
+component? For sure, it has some embedded API mux for API routes management.
+The good new: you can add an extra API route here, with your own very custom
+logic of response. It might be not just some CRUD for objects (including native
+and CRD-based ones), but also completely custom.
+
+The most known example is the `metrics-server`. It is actually "almost native"
+component (as explained in [Control Plane](/architecture/control-plane)), but
+still optional and the logic of this controller had been reasonably separated
+to another service, running in cluster. To bind this service with Kubernetes
+API, you need to create `APIService` object.
+
+```yaml
+## Just a common APIService definition for metrics server which allows
+## you performing `kubectl top pods`.
+##
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.metrics.k8s.io
+spec:
+  group: metrics.k8s.io  # group
+  version: v1beta1       # version
+  service:               # responsible service
+    name: metrics-server
+    namespace: kube-system
+    port: 443
+```
+
+For the manifest above, you can call it with `kubectl get --raw /apis/metrics.k8s.io/v1beta1`
+and Kubernetes API just forward the request to the downstream service defined
+in the manifest. It will also handle RBAC checks, but here it's not that simple
+because it's not a resource-based call. To grant access to that service (at
+Kubernetes API level), you need to enable `nonResourceURLs` in RBAC:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubectl-top
+rules:
+- ## Paths allowed in the Kubernetes API, not downstream API!
+  ##
+  nonResourceURLs:
+  - '/apis/metrics.k8s.io/v1beta1'
+  - '/apis/metrics.k8s.io/v1beta1/*'
+  ## Common verbs, usually attached to types of downstream API calls
+  ##
+  verbs: 
+  - get
+  - list
+  - watch
+```
+
+You should also keep in mind:
+* If you specify `nonResourceURLs`, you should only rely upon these rules for the
+`APIService`.
+* In case of `nonResourceURLs`, RBAC controls only forwarding to the service. You
+can enable additional authentication on the workload (service) side.
+* You can also use the common RBAC rules (with groups, versions, kinds, verbs,
+names), but only if you implement the similar API. Then RBAC will work the same
+as for other objects.
+* This is a god-forgotten way to expand Kubernetes API. Prefer different ways to
+implement operator if possible.
+
+## How it (usually) works
+
+The point of Kubernetes Operator pattern is extending the existing set of [Finite
+State Machines](/essentials/finite-state-machines). The operator implementation is
+usually a number of workloads (Pods) which communicate with Kubernetes API in the
+different ways:
+* Collect information with get/list requests
+* Watch for updates of specific objects via watch calls
+* Implement validation and mutation webhook servers (in other words, just uses
+Admission Controller as a part of operator's logic)
+* Perform changes of custom objects, manage other objects (for example, for custom
+pods allocation across nodes)
+* Communicate with other services and operators
+* Everything else what workload can do (for example, manage nftables, mount volumes,
+or even count sheep)
+
+The Kubernetes Operator is the most extensive and complex pattern what expands the
+native features of Kubernetes. Development of an operator requires a lot of work
+around appropriate testing of its functions. And the complexity is not only in the
+development side, it's also on the user side. When you extend some functionality,
+you must be sure how it works and what it does. Kubernetes native features are
+exhaustingly tested, but operators may lack of appropriate tests. Thus, for the
+mission-critical applications, it's better to use only the well-known operators
+you 100% know how they perform.
+
+<Callout type="warning">
+**Again**: Kubernetes is complex system, and operators make it even more complex.
+Be careful with extending your Kubernetes too much, because it also makes the
+troubleshooting more complex.
+</Callout>
+
+## Difference with Admission Controller
+
+This paragraph sounds not that helpful, but I found that there is a lot of junior
+software engineer and DevOps engineers who cannot answer it.
+
+The Admission Controller is a feature of Kubernetes, which allows you intercepting
+create, update, and delete requests and (optionally) modify the content of such
+request or decline it. The Kubernetes Operator is a pattern of engineering system
+which implements advanced logic for controlling workloads and all what surrounds
+them. Operator can use Admission Controller features for some useful cases like
+sidecar injection, but don't have to.
+
+Well, the short answer: Admission Controller is a group of Kubernetes features,
+and Operator is a software system which expands native Kubernetes functionality
+(and can use Admission Controller if necessary).
+
+## Use cases
+
+Same as for Admission Controller examples on the corresponding page, here is the
+list of the most popular operators with a simple explanation.
+
+### Prometheus Operator
+
+[Prometheus Operator](https://prometheus-operator.dev/) is an application which
+tightly integrates with Kubernetes API to collect, persist, and expose metrics
+from/to the cluster. Under the hood, it creates a couple of CRDs (s.a.
+`ServiceMonitor`, `Probe`, `PrometheusRile`, etc.) which should store the portions
+of Prometheus configurations. Operators just takes all of these CRD objects and
+generate the configuration for Prometheus server (which is another CRD `Prometheus`
+object).
+
+As an alternative, there is a Helm chart for Prometheus server and its plenty of
+components: https://github.com/prometheus-community/helm-charts. This chart is
+pretty complex, but works only with the native Kubernetes features (thus doesn't
+overcomplicate already complex things and maintains less risks of issues with
+troubleshooting).
+
+### Cert Manager
+
+[Cert Manager](https://cert-manager.io/) is a pretty simple operator which
+enables CA management features for Kubernetes. It doesn't change the behavior of
+any workloads, it only takes care about certificates and TLS secrets (mainly for
+`Ingress` objects). It can issue trusted SSL certificates (with `LetsEncrypt`),
+and even automate HTTP/DNS/TLS validation. The operator has a couple of CRDs
+(s.a. `Certificate`, `ClusterIssuer`, `Issuer`), uses Admission Controller
+(but the reason isn't obvious) for listening these objects, can read `Ingress`
+and `Secret` objects for automating the routines around `Certificate` objects.
+
+Practically, it's the simplest operator, and also pretty useful. Just ensure
+you have alerts for the certificates what are close to expire.
+
+The alternative might be just using `CronJob` with Certbot and a couple of scripts
+which update certificate in the `Secret` object. Sometimes you just don't need
+to deploy 3 to 6 pods for some operator you will use 5 times a year.
+
+### Stash Operator
+
+[Stash Operator](https://github.com/stashed/stash) is an operator for backups.
+It mostly relies upon Admission Controller, because injects additional pods
+which perform backup/restore operations (and additional commands if necessary).
+This operator has a couple of CRDs (s.a. `Repository`, `BackupConfiguration`,
+`BackupBatch` and `RestoreBatch`, etc.) which configure how to perform backups,
+where to store them, etc.
+
+Although backups is the important part of production instance operation, there
+are the simple ways to implement backups. For most cases, it should be enough
+to use backup/recovery scripts. Practically, you anyway have to implement some
+automation for these routines, with Stash Operator or without.
+
+### Longhorn
+
+Longhorn is a complex operator with a very custom logic for its workloads,
+custom pod scheduler, handful of CRDs, and a lot of internal logic. It serves
+as an operator for CSI, thus manages volumes and data on them. It seems for this
+case it's absolutely necessary to enable very custom pods/volumes allocation
+logic for its components. You will find no `Deployment`s, `DaemonSet`s, and other
+pods controllers, the operator's allocation logic is deep within this
+application.
+
+The operator is based on classic CSI driver (even uses native encryption feature
+of CSI). It has a couple of CRDs, such as `RecurringJob`, `Backup`, `Volume`,
+`Snapshot`, etc.
+
+The operator implements the redundant storage layer for Kubernetes. However, as
+well as all other storage systems in Kubernetes, it has its own advantages and
+flaws.
+
+## Implementing Operators
+
+Practically, it's not that complex. You simple develop some application, in any
+language, perform necessary requests to the Kubernetes API, maybe configure
+admission controller webhooks and/or additional CRDs, etc. And, of course, there
+are a couple of recommendations:
+
+* Your operator shouldn't depend on itself. For example, if you implement some
+workload controller, avoid running components of the operator in these types of
+workloads. When you install this (very likely as a [Helm chart](https://helm.sh/)),
+just use native Kubernetes features, such as `DaemonSet`s, `Deployment`s and/or
+`StatefulSet`s. This can improve the reliability of your operator.
+
+* Keep in mind that CRDs are not for free. They also consume resources, mostly
+from `etcd`. For significant numbers of CRD objects, you can experience the
+performance degradation, and sometimes it may case the partial degradation of the
+whole cluster, especially while the disruption events.
+
+* As well as any other software, your application should survive the upgrade,
+maintenance, and partial cluster disruption. Take the redundancy of your
+operator seriously, especially when it works in business-critical environments.
+Configure multiple pods (use `Lease`s if necessary), enable `PodDisruptionBudget`s
+and `podAntiAffinity`, harden the security settings, etc.
+
+* For some special cases, you may need to configure rarely used features, such as
+workloads priority (`PriorityClass`) and device classes (`DeviceClass`), permissive
+tolerations (`tolerations: [{"operator":"Exists"}]`), and other features. Ensure
+that you have configured the access to these objects with RBAC rules.
+
+* While configuring RBAC for your provider, still prefer to use [the principle of
+least privileges](https://en.wikipedia.org/wiki/Principle_of_least_privilege),
+bot don't overcomplicate it. If you create some CRD, just enable the full access
+to the whole kind. It is just simpler to manage, and usually doesn't hurt the
+security of your operator. Of course, for the native Kubernetes kinds, just
+keep the rules as granular as possible.
+
+* To improve the security of your operator, it's usually worth (and not that
+complex) encapsulating all components' intercommunication into mutual TLS and
+prepare the template for `NetworkPolicy`. It will just make the adepts of
+zero-trust happy, giving your provider a place in the companies which cannot adopt
+software without such security measures.
+
+## Summary
+
+Congratulations! You now have the common understanding of operators and their
+development. As you can see, operators play a significant role within Kubernetes
+environments, and adopting a new operator can often be both crucial and
+challenging. At least, you are able to manage this process and even
+reverse-engineer it if needed.

@@ -240,7 +240,7 @@ This is a special application which directly communicates with kubelets
 and API, and API directly communicates with it. This component exposes
 containers' resource metrics (like CPU and memory consumption) for API.
 The command `kubectl top` depends on this component. Controller manager
-depends on this service for HPA.
+depends on this service for `HorizontalPodAutoscaller`.
 
 This component is optional (but strongly recommended), "delayed", and
 usually runs in a Kubernetes cluster.
