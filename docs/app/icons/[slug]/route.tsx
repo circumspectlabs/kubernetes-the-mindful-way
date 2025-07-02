@@ -1,28 +1,33 @@
 export const dynamic = "force-static";
 
-///
-/// This page doesn't work in dev mode (in SSR mode),
-/// but works pretty fine in SSG.
-///
-
+import type { NextRequest } from "next/server";
 import { ImageResponse } from "next/og";
-
-// Image metadata
-export const size = {
-  width: 1200,
-  height: 630,
-};
-
-export const contentType = "image/png";
+import { icons } from "../../iconset";
 
 export async function generateStaticParams() {
-  return [{}];
+  return icons.map((param) => ({
+    slug: param.name,
+  }));
 }
 
-export default async function Image() {
-  const roboto = await fetch(
-    "https://tug.ctan.org/fonts/roboto/opentype/Roboto-Bold.otf", // just Roboto font on OTF format
-  )
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ slug: string }> }
+) {
+  const slug = (await params).slug;
+
+  const contexts = icons.filter((e) => {
+    return e ? e.name == slug : null;
+  });
+
+  if (!contexts.length) {
+    return new ImageResponse(<></>, {
+      status: 404,
+    });
+  }
+
+  const context = contexts[0];
+
   return new ImageResponse(
     (
       <div
@@ -33,22 +38,17 @@ export default async function Image() {
           alignItems: "center",
           justifyContent: "center",
           flexDirection: "row",
-          backgroundImage: "linear-gradient(to bottom, #dbf4ff, #fff1f1)",
-          fontSize: 130,
-          letterSpacing: -2,
-          fontWeight: "bold",
           textAlign: "center",
         }}
       >
         <div
           style={{
             display: "flex",
-            margin: "30px",
           }}
         >
           <svg
-            width="440px"
-            height="440px"
+            width={`${context.width}px`}
+            height={`${context.height}px`}
             viewBox="0 -10.44 722.846 722.846"
             xmlns="http://www.w3.org/2000/svg"
           >
@@ -66,55 +66,11 @@ export default async function Image() {
             />
           </svg>
         </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          <div
-            style={{
-              backgroundImage:
-                "linear-gradient(90deg, rgb(50, 108, 229), rgb(0, 223, 216))",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            The
-          </div>
-          <div
-            style={{
-              backgroundImage:
-                "linear-gradient(90deg, rgb(50, 108, 229), rgb(50, 183, 176))",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            Mindful
-          </div>
-          <div
-            style={{
-              backgroundImage:
-                "linear-gradient(90deg, rgb(50, 108, 229), rgb(0, 223, 216))",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            Way
-          </div>
-        </div>
       </div>
     ),
     {
-      ...size,
-      fonts: [
-        {
-          name: 'Roboto',
-          data: await roboto.arrayBuffer(),
-          style: 'normal',
-          weight: 800,
-        },
-      ],
+      width: context.width,
+      height: context.height,
     }
   );
 }

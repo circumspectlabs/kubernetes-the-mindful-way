@@ -1,5 +1,6 @@
 export const site = {
   name: "Kubernetes - The Mindful Way",
+  description: "The architect-level guilde for running Kubernetes in hybrid and on-premise environments.",
   url: "https://kubernetes.the-mindful-way.io",
 };
 

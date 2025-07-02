@@ -1,10 +1,8 @@
 import { generateStaticParamsFor, importPage } from "nextra/pages";
 import { useMDXComponents as getMDXComponents } from "../../mdx-components";
+import { site } from "../../settings";
 
 export const generateStaticParams = generateStaticParamsFor("mdxPath");
-
-const fallbackMetadataDescription: string =
-  "The architect-level guilde for running Kubernetes in hybrid and on-premise environments.";
 
 export async function generateMetadata(props) {
   const params = await props.params;
@@ -12,7 +10,7 @@ export async function generateMetadata(props) {
   const moreMetadata = Object.assign({}, metadata, {
     description: metadata.description
       ? metadata.description
-      : fallbackMetadataDescription,
+      : site.description,
   });
   return moreMetadata;
 }

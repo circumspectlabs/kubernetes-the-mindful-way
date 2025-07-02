@@ -7,6 +7,7 @@ import { getPageMap } from "nextra/page-map";
 import Logo from "./logo";
 import { themeColorSettings } from "../theme";
 import { site, vendor, base, locale, license } from "../settings";
+import { linkedIcons } from "./iconset";
 
 export const metadata = {
   metadataBase: new URL(site.url),
@@ -19,7 +20,7 @@ export const metadata = {
     siteName: site.name,
     locale: locale,
     type: "website",
-    images: "/opengraph-image"
+    images: "/opengraph-image",
   },
 };
 
@@ -55,7 +56,12 @@ const footer = (
 export default async function RootLayout({ children }) {
   return (
     <html lang="en" dir="ltr" suppressHydrationWarning>
-      <Head color={themeColorSettings}></Head>
+      <Head color={themeColorSettings}>
+        <>
+          <meta name="robots" content="noindex, nofollow" />
+          {linkedIcons.map((item) => (<link key={item.name} {...item.icon} href={`/icons/${item.name}`} />))}
+        </>
+      </Head>
       <body>
         <Layout
           darkMode={true}

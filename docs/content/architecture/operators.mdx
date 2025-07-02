@@ -222,13 +222,13 @@ automation for these routines, with Stash Operator or without.
 
 ### Longhorn
 
-Longhorn is a complex operator with a very custom logic for its workloads,
-custom pod scheduler, handful of CRDs, and a lot of internal logic. It serves
-as an operator for CSI, thus manages volumes and data on them. It seems for this
-case it's absolutely necessary to enable very custom pods/volumes allocation
-logic for its components. You will find no `Deployment`s, `DaemonSet`s, and other
-pods controllers, the operator's allocation logic is deep within this
-application.
+[Longhorn](https://github.com/longhorn/longhorn) is a complex operator with a very
+custom logic for its workloads, custom pod scheduler, handful of CRDs, and a lot of
+internal logic. It serves as an operator for CSI, thus manages volumes and data on
+them. It seems for this case it's absolutely necessary to enable very custom
+pods/volumes allocation logic for its components. You will find no `Deployment`s,
+`DaemonSet`s, and other pods controllers, the operator's allocation logic is deep
+within this application.
 
 The operator is based on classic CSI driver (even uses native encryption feature
 of CSI). It has a couple of CRDs, such as `RecurringJob`, `Backup`, `Volume`,
