@@ -1,6 +1,364 @@
 ---
-description: "TODO"
+description: "This page explains the common concepts of security baseline. It introduces practical Kubernetes security levels and helps engineers understand what to protect, from what, and when to apply which level of defense."
 ---
+import { Callout } from 'nextra/components';
+
 # Security Baseline
 
-TODO
+{/* TODO: links*/}
+
+Security Baseline is the kind of minimal security requirements for the system.
+They're usually a part of business to development contract, defined in the
+design requirements document. However, business should define the security
+baseline, the practice is that business fellows hardly can formulate anything
+else than "make your best" or "let's keep it cheap", usually both. That's the
+reason why usually engineering department defines the baseline, confirms it
+with the business, and then follows it as a development contract.
+
+Every time we talk about security baseline, we have to keep in mind that it
+is two sides of coin: organizational and technical. Organizational part
+consists of general policies (s.a. information security policy, etc.), risk
+assessment, budgeting, compliance programs, and much more. Technical part
+mostly consists of the implementation and proper maintenance of these policies.
+This article and section mostly covers technical implementation side,
+relatively to the organizational requirements.
+
+Most of all companies who reasonably adopt Kubernetes follow one of
+well-designed templates, and apply necessary "patches" to handle business
+specific. If we identified the technical side of security baseline from
+scratch, we would need to perform security threats analysis specifically for
+the business case. However, the practice of that process is usually related to
+the core technologies applied in the system. For Kubernetes, there are a few
+common well-designed baselines. Let's examine them below.
+
+This article should be useful for security managers and engineers foremost,
+and for other software engineers and designers as well. This page is about
+common practical things, such as "what we protect", "from what we protect",
+and "when to apply which level of security".
+
+<Callout type="info">
+The page doesn't cover how to implement mentioned security practices. The goal
+of this article is reasoning and understanding why and when to apply which
+practices.
+</Callout>
+
+## Levels of Security
+
+In the Kubernetes world, there are several clearly established security
+baselines. They vary depending on factors like business maturity, budget for
+implementation and maintenance, compliance requirements, and real security
+needs. Practically, the engineering teams tend to choose one of the defined
+below implementations, with additions and simplifications for particular
+case.
+
+All of identified below security baselines follow the basic principles of
+least privileges, sufficient reason, and favors the simple and effective
+measures.
+
+<Callout type="warning">
+This article only covers what's important for Kubernetes security. Of course,
+for the real security, you will have to enable appropriate security measures
+for other neighboring systems.
+</Callout>
+
+### Common
+
+Although it's the weakest level of security, it's still pretty complete and
+popular for the cases when you don't need to follow complex compliance
+programs, and you don't attract too much attention from potential security
+threat actors. The common security level applies only one layer of security:
+from external sources.
+
+**What you should take care of:**
+
+* De-expose external services. Make the externally available interfaces
+unreachable from internet. For example, just disable public IP for Kubernetes
+API (usually TCP/6443) and other endpoints (including SSH). You can make it
+available only through secure VPN or proxy - which is very simple part of
+infrastructure. Leave only Ingress Controller available from outside. This
+ultimate measure drastically increases the complexity of any attack.
+
+* If you expose some HTTP interface, expose it though Ingress Controller. It
+provides the basic level of protection from protocol-based abuses. Avoid
+exposing your HTTP services directly through Load Balancer or `NodePort`
+service.
+
+* Limit access to the Kubernetes API to only CI/CD and some responsible
+engineers. It should be as less number of people and entities as possible.
+Practically, just allow to use Kubernetes API via mutual TLS connection for
+your DevOps team and a few senior developers, and timely rotate credentials
+for outgoing staff. Since the most attacks are based on leaked credentials,
+it's better to maintain as less number of credentials as possible.
+
+* Configure basic workload restrictions, such as dropping all capabilities,
+running from non-root user, and limit available resources for the containers
+(just CPU and memory). It significantly increase the complexity of attacks
+on the application (mainly RCE).
+
+* Properly collect metrics and logs, including related to security (such as
+`/var/lib/auth.log`). Not only for observability, you should be able to
+analyze (at least briefly) impact and scope of breach, if any.
+
+**What you should postpone:**
+
+* Do not overcomplicate security patterns. If your stakeholders wisely choose
+this security guideline, your company usually doesn't ready to spend too many
+resources for maintaining (basically spending time of developers) more
+complex workload security restrictions.
+
+* Avoid using the security technologies you don't know well enough. It's
+kind of norm when you cannot configure some security feature at the first
+time. And even when you can, it usually complicated the development,
+debugging, and troubleshooting, thus slows down the process (not only for
+responsible engineers).
+
+The outcome of these measures is the highest velocity, pretty simple shift
+left (when you make developers responsible for the configuration of their
+workloads - practically only a few developers), and still pretty secure
+environment, because the potential attacker still needs to bypass your
+external perimeter.
+
+### Hardened
+
+This is the higher security baseline which enables more restrictions,
+practically in favor to some basic security compliance programs like GDPR,
+ISO27001, and SOC2 Type II. It has a moderate level of real security. Here we
+implement two major protection layers: from external threats, privilege
+escalation, and attack persistence. This also requires implementing the
+appropriate measures for breach detection, impact analysis and breach
+remediation.
+
+**What you should take care of:**
+
+* Everything from the `Common` baseline.
+
+* Enable host intrusion detection system (HIDS), which can send alert as
+an immediate response for malicious actions, such as bruteforce of SSH or
+integrity violation of the most important files in the operating system.
+As soon as your node has been compromised, you should know about it and
+be able to investigate it to perform appropriate remediation.
+
+* Enable automatic security patching of Kubernetes nodes. Usually with
+`unattended-upgrades` or `dnf-automatic`. Timely perform security patching
+of Kubernetes versions. It should be simple for cloud environments, and
+less simple for hybrid and on-premise environments. Keep in mind that it
+can sometimes perform restart of the updated services, thus may interrupt
+services for short time period. But it's necessary for appropriate
+vulnerability management.
+
+* Enable the more tight workload security measures: read-only filesystem
+for application (business logic) containers. Even more complex to attack
+and persist in there.
+
+* Partially implement network segregation, focusing on segregation of the
+whole cluster from other environments. Optionally, you can apply additional
+network segregation between application namespaces and platform services.
+For example, for the namespace with business logic components, allow
+outgoing connections only to necessary platform services, such as
+databases, DNS, remote endpoints, etc.
+
+* Integrate corporate IdP into Kubernetes API service. You can use
+OIDC, LDAP, and other providers of centralized accounting, with native
+Kubernetes features. It should look similar how you authenticate in
+AKS/GKE/EKS, with JWT token from trusted party. It simplifies access
+management while follows the most common compliance needs.
+
+* Enable Kubernetes audit logs and events collection, with immediate push
+of data to some separated remote service. This service should be accessible
+only for writes of new records, without read, update, nor delete permissions.
+
+* You should timely upgrade all Kubernetes components, including but not
+limiting control plane components, essential services (CoreDNS, CNI, CSI,
+etc). Pay the special attention to the services that work with external
+traffic, s.a. Ingress Controller, WAF, Haproxy, websocket handlers, etc.
+
+* As a recommendation, you can implement some admission policies. Only the
+most useful ones, s.a. mandatory container security context configuration,
+allowed registries/images, etc.
+
+**What you should postpone:**
+
+* You should still avoid complex policies, otherwise you will have to spend
+a way more than expected resources for their maintenance (implementation,
+support, timely update, etc).
+
+**What you should NEVER do:**
+
+* When you have implemented some integration with IdP, then avoid using mTLS
+credentials or persistent tokens as a main way to access Kubernetes API.
+Persistent credentials usually require manual maintenance like revocation or
+keys rotation.
+
+* Never use antiviruses on nodes if such antivirus software doesn't directly
+state that they are for container hypervisors. Because it just doesn't work,
+only slows down and sometimes corrupt containers. Such measure doesn't improve
+the real security. For the compliance needs, you can just ask an official
+letter from your CISO/CTO that you don't use antiviruses for Kubernetes nodes
+and accept the risks of that (which are the same as if you do).
+
+This level of security is a balanced solution for all interests of business,
+including development velocity, compliance requirements, and real security.
+
+### Zero Trust
+
+This is the most restricted security baseline (in this shortlist), recommended
+only for large teams with significant budget and compliance requirements. It
+usually doesn't worth if you don't have to follow complicated compliance
+programs s.a. HIPAA, PCI DSS, or FedRAMP.
+
+If the `Hardened` baseline is more focused on the breach detection and the
+common measures for breach prevention and remediation, `Zero Trust` baseline
+is mostly about decreasing possible breach impact to less scope, isolating and
+segregating these scopes, and enabling scope-specific security measures.
+
+**What you should take care of:**
+
+* Everything from the `Hardened` baseline.
+
+* Now you need some kind of container intrusion detection system (CIDS),
+which is practically close to behavioral patterns violation detection. For
+example, if normally your application only communicates with two databases
+and 2 other microservices, you should identify when this application starts
+doing something else what you don't expect (aka [Heuristic Antivirus Software](https://en.wikipedia.org/wiki/Heuristic_analysis)).
+Typical detection rules: binding unexpected socket, burst of new client
+sockets with different destination (scanning), unexpected DNS queries,
+attempt to read/write/persist some file, etc.
+
+* You also need some kind of security events aggregation and analysis system,
+practically it's SIEM which ingests logs and tries to identify complex events
+from the existing ones. For example, burst of connections to Kubernetes API,
+unexpected network activity on instances, attempt to install some packages
+from unapproved source, attempt to run unsigned container image, etc.
+
+* Enable more complex network segregation. In the context of Kubernetes, just
+use strict `NetworkPolicies`. Allow only what should be allowed (DNS, selected
+microservices, databases, message brokers, limited set of external services,
+etc.), deny everything else (with default `NetworkPolicy`). Enable access to
+internet only when it's necessary for the application.
+
+* Implement intrusion prevention system. It shouldn't be something complex,
+just start with ephemeral blacklisting (temporary ban of IP addresses detected
+as malicious by your SIEM), blacklist all traffic from tor/i2p exit nodes.
+Later, you can automate responses for some kinds of events: for example, you
+can automatically suspend service account tokens or user accounts when they
+used from unexpected source.
+
+* Run control plane without `kubelet`s. Just run control plane components
+separately from all workloads, even system ones. This prevents unnecessary
+access to Kubernetes internal certificates/keys (s.a. service account token
+issuer key) and etcd certificates/keys and socket. This option also makes
+your cluster "headless", like in clouds.
+
+* Implement advanced admission policies: restrict `hostPath` volumes,
+`hostNetwork`, `hostIPC`, and `hostPID` options; allow only specific list of
+runtime classes and priority classes; disable `NodePort` services and
+`ExternalIPs` feature; etc.
+
+* Limit available DNS zones. You've already limited outbound connections, now
+you need to limit DNS requests forwarding. Enable DNS zones whitelist and
+apply for CoreDNS configuration. It practically consists of whole
+`cluster.local` zone and some additional allowed domains.
+
+<Callout type="info">
+There is a common red team trick for identifying if exploit works, known as
+[Out-of-Bound DNS Query](https://notsosecure.com/out-band-exploitation-oob-cheatsheet).
+Attacker can build a payload which tries to download something from specific
+URL. When the payload works out, it always calls DNS query, and this query
+reaches the corresponding DNS server, even when the container where this
+payload has beed executed doesn't have access to internet.
+</Callout>
+
+**What you should NEVER do:**
+
+* Do not encrypt ETCd keys. It practically doesn't improve your real security.
+You anyway have the encryption manifest on the control plane filesystem,
+easily accessible via `hostPath`. You can partially mitigate this by admission
+policies, but practically there are a lot of unobvious configuration mistakes
+that can help to bypass this measure.
+
+* Do not share ETCd and do not enable ETCd's RBAC. Just use mutual TLS
+authentication. RBAC is pretty useless when you have only one full-featured
+client - Kubernetes API. And if you share this ETCd with some other service or
+party, you anyway have a more severe security flaw, even when RBAC is
+configured properly.
+
+## Designing Security
+
+If you want to implement a technical project with fair level of excellence, you
+have to take care about proper designing of this project well in advance. In
+theory, it should be 100% of facts, but practically it's only 60% to 80% of all
+necessary requirements and nice to have statements, and the remaining part you
+will get to know while implementation.
+
+The appropriate design of the system can reduce a lot of efforts spent for
+implementation and maintenance, especially for security. There is a common
+approach to designing security, not only for Kubernetes environments:
+
+* Reduce attack surface. Just avoid running components of Kubernetes in public
+networks (nodes with public IP addresses).
+
+* It's useful to have an overlay network between nodes separated from other
+networks, because simplifies firewall rules. Avoid direct network access to
+pods and services from outside the cluster. Just use Kubernetes features
+for exposing services, even when you expose interfaces for internal networks.
+
+* Use `Namespace`s for segregating different services. It's a way simpler to
+configure `NetworkPolicies` between namespaces than between different services
+in the same namespace.
+
+* Define the areas of responsiblity in the cluster and services configuration,
+including for the security team. It drastically simplifies the management of
+resources. For example, developers are responsible for business logic, platform
+team is responsible for additional services, and security team should be
+responsible for WAF and CIDS detection rules. The exact areas may vary.
+
+* Define a budget for security needs. For example, define the budget as a
+number of working hours for implementation and maintenance by a single senior
+software engineer, and adjust your roadmap with it. This measure should resolve
+90% of Shakespeare-like "do or not to do" disputes.
+
+* Timely adjust the budget for security. Of course, when you define the budget
+for the first time, you don't sure how it really suits. Adjust it biannually
+according to your observations.
+
+However, these recommendations are mostly for general security design, it's
+also applicable to the common system design for reliability, performance,
+scalability, capacity, etc.
+
+## Choosing the Right Baseline
+
+To assemble the appropriate baseline, you need to define the budget for
+security. The budget should consist of human resources (e.g. working hours
+of senior software engineer) and money. Of course, the size should correlate
+business needs, such as compliance requirements, risks mitigation, etc.
+
+Since the budget usually tends to one of the mentioned before levels of
+security, it's usually enough to choose the closest to your business scenario.
+However, there are several common mistakes you should know well in advance:
+
+* Do not over- and under- estimate the security needs. If you don't need to
+follow complex compliance programs today, and still unsure if you need it the
+next year, do not implement too complex security measures. Every security
+measure decreases development velocity. You should always balance between
+security and other aspects of your business processes. Yes, there are cases
+when it's too secure unnecessarily.
+
+* Do not implement complex measures when you haven't implemented simple ones.
+You don't need to integrate honeypots when you haven't started to collect
+audit and security logs to remote service. Building secure services is a long
+and ordered processes, you can't skip steps.
+
+* You hardly can design appropriate security measures without discovery of
+the technical services and features you are going to rely upon. Any security
+starts from inventory of the system. Consider reviewing all existing and
+planned services.
+
+## Quick Summary
+
+The security is always a story about competition of "sword" and "shield". You
+should understand that as much your "shield" budget, as more expensive "sword"
+your attacker needs. The masterpiece of security is in the amplification
+factor: when you spend `N` for "shield", it means `MxN` average costs of
+successful attack (where `M` is the amplification factor). The appropriate
+security measures just make the attacking of your infrastructure unprofitable,
+and it's only point of security.
