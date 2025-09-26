@@ -1,4 +1,4 @@
-etcd_version: "3.5.19"
+etcd_version: "3.5.22"
 etcd_conf_dir: /etc/etcd
 etcd_data_dir: /var/lib/etcd
 etcd_cluster_name: kubernetes
@@ -17,4 +17,8 @@ machine_arch_map:
   x86_64: amd64
   amd64: amd64
 
-etcd_force_upgrade: "{{ force_upgrade | default(false) }}"
+###
+### The switch disables some things to make it suite for
+### `serial: 1` mode.
+###
+upgrade_mode: false

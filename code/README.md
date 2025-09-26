@@ -96,7 +96,7 @@ brew install qemu libvirt virt-manager cdrtools swtpm
 brew services start libvirt
 
 python -m venv .venv
-( source .venv/bin/activate; python -m pip install virt-firmware )
+( source .venv/bin/activate; python -m pip install -U virt-firmware )
 ```
 
 <!-- #### Linux

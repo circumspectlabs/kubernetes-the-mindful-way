@@ -34,7 +34,7 @@
     keepalived_unicast_peer_addresses: |-
       {% set self_peer = hostvars[ansible_hostname]['ansible_' + keepalived_interface]['ipv4']['address'] | string %}
       {% macro get_unicast_peer_addresses() -%}
-      {% for host in play_hosts %}
+      {% for host in ansible_play_batch %}
       {% set interface_facts = hostvars[host]['ansible_' + hostvars[host]['keepalived_interface']] %}
         {{ interface_facts['ipv4']['address'] }}
       {% endfor %}
@@ -73,7 +73,7 @@
 
 - name: Set fact with keepalived password
   ansible.builtin.set_fact:
-    keepalived_password: "{{ hostvars[play_hosts[0]].keepalived_slurp.content | b64decode }}"
+    keepalived_password: "{{ hostvars[ansible_play_batch[0]].keepalived_slurp.content | b64decode }}"
   run_once: true
   when: keepalived_slurp.content is defined
 
@@ -86,7 +86,7 @@
 
 - name: Propogate keepalived password
   ansible.builtin.set_fact:
-    keepalived_password: "{{ hostvars[play_hosts[0]].keepalived_password }}"
+    keepalived_password: "{{ hostvars[ansible_play_batch[0]].keepalived_password }}"
 
 - name: Persist keepalived password
   ansible.builtin.copy:

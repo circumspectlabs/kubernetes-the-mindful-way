@@ -21,6 +21,7 @@ platforms:
     disk_size: "20G"
     memory_size: "4G"
     vcpu: "2"
+    tpm: true
   - name: control-plane-2
     groups:
       - control-plane
@@ -28,6 +29,7 @@ platforms:
     disk_size: "20G"
     memory_size: "4G"
     vcpu: "2"
+    tpm: true
   - name: control-plane-3
     groups:
       - control-plane
@@ -35,6 +37,7 @@ platforms:
     disk_size: "20G"
     memory_size: "4G"
     vcpu: "2"
+    tpm: true
   # - name: worker-1
   #   groups:
   #     - worker
@@ -42,6 +45,7 @@ platforms:
   #   disk_size: "20G"
   #   memory_size: "4G"
   #   vcpu: "2"
+  #   tpm: true
   # - name: worker-2
   #   groups:
   #     - worker
@@ -49,6 +53,7 @@ platforms:
   #   disk_size: "20G"
   #   memory_size: "4G"
   #   vcpu: "2"
+  #   tpm: true
 provisioner:
   name: ansible
   log: true

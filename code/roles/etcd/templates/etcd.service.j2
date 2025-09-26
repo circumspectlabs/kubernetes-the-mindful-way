@@ -23,7 +23,7 @@ ExecStart=/usr/local/bin/etcd \
   --advertise-client-urls=https://{{ vlan_ip }}:2379 \
   --initial-advertise-peer-urls=https://{{ vlan_ip }}:2380 \
   --initial-cluster-token={{ etcd_cluster_name }} \
-  --initial-cluster={{ play_hosts | map('hash', 'md5') | ansible.builtin.product(['=https://']) | map('join') | list | ansible.builtin.zip(play_hosts | map('extract', hostvars) | map(attribute='vlan_ip')) | map('join') | list | ansible.builtin.product([':2380']) | map('join') | list | join(',') }} \
+  --initial-cluster={{ ansible_play_batch | map('hash', 'md5') | ansible.builtin.product(['=https://']) | map('join') | list | ansible.builtin.zip(ansible_play_batch | map('extract', hostvars) | map(attribute='vlan_ip')) | map('join') | list | ansible.builtin.product([':2380']) | map('join') | list | join(',') }} \
   --initial-cluster-state=new \
   --listen-metrics-urls=http://{{ vlan_ip }}:2381,http://127.0.0.1:2381 \
   --data-dir={{ etcd_data_dir }}

@@ -4,3 +4,10 @@
     name: etcd.service
   timeout: "{{ etcd_restart_timeout }}"
   throttle: 1
+
+- name: etcd wait for ready
+  ansible.builtin.service_facts: {}
+  register: result
+  until: result.ansible_facts.services['etcd.service'].state == 'running'
+  retries: 60
+  delay: 1

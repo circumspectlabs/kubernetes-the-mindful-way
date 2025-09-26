@@ -47,6 +47,7 @@
   with_items:
     - ca
     - peer/ca
+  when: 'not upgrade_mode'
 
 - name: Create Etcd CA certificate sign request (self)
   community.crypto.openssl_csr:
@@ -63,13 +64,14 @@
   with_items:
     - ca
     - peer/ca
+  when: 'not upgrade_mode'
 
 - name: Create Etcd CA certificate
   community.crypto.x509_certificate:
     path: "{{ etcd_conf_dir }}/pki/{{ item }}.crt"
     privatekey_path: "{{ etcd_conf_dir }}/pki/{{ item }}.key"
     csr_path: "{{ etcd_conf_dir }}/pki/{{ item }}.csr"
-    entrust_not_after: "+3650d" # 10 years
+    ownca_not_after: "+3650d" # 10 years
     provider: selfsigned
     owner: root
     group: etcd
@@ -78,6 +80,7 @@
   with_items:
     - ca
     - peer/ca
+  when: 'not upgrade_mode'
 
 - name: Get Etcd CA
   ansible.builtin.slurp:
@@ -91,10 +94,10 @@
     - peer/ca.crt
 
 - ansible.builtin.set_fact:
-    etcd_ca_key: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
-    etcd_ca_crt: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
-    etcd_peer_ca_key: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'peer/ca.key') | map(attribute='content') | first | b64decode }}"
-    etcd_peer_ca_crt: "{{ hostvars[play_hosts[0]].etcd_slurp.results | selectattr('item', 'equalto', 'peer/ca.crt') | map(attribute='content') | first | b64decode }}"
+    etcd_ca_key: "{{ hostvars[ansible_play_batch[0]].etcd_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
+    etcd_ca_crt: "{{ hostvars[ansible_play_batch[0]].etcd_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
+    etcd_peer_ca_key: "{{ hostvars[ansible_play_batch[0]].etcd_slurp.results | selectattr('item', 'equalto', 'peer/ca.key') | map(attribute='content') | first | b64decode }}"
+    etcd_peer_ca_crt: "{{ hostvars[ansible_play_batch[0]].etcd_slurp.results | selectattr('item', 'equalto', 'peer/ca.crt') | map(attribute='content') | first | b64decode }}"
 
 - name: Put Etcd CA files
   ansible.builtin.copy:
@@ -164,13 +167,14 @@
     csr_path: "{{ etcd_conf_dir }}/pki/peer.csr"
     ownca_path: "{{ etcd_conf_dir }}/pki/peer/ca.crt"
     ownca_privatekey_path: "{{ etcd_conf_dir }}/pki/peer/ca.key"
-    entrust_not_after: "+3650d"
+    ownca_not_after: "+3650d"
     provider: ownca
     owner: etcd
     group: etcd
     mode: '0600'
   notify:
     - etcd daemon-restart
+    - etcd wait for ready
 
 - name: Create Etcd server certificate sign request
   community.crypto.openssl_csr:
@@ -196,13 +200,14 @@
     csr_path: "{{ etcd_conf_dir }}/pki/server.csr"
     ownca_path: "{{ etcd_conf_dir }}/pki/ca.crt"
     ownca_privatekey_path: "{{ etcd_conf_dir }}/pki/ca.key"
-    entrust_not_after: "+3650d" # 10 years
+    ownca_not_after: "+3650d" # 10 years
     provider: ownca
     owner: etcd
     group: etcd
     mode: '0600'
   notify:
     - etcd daemon-restart
+    - etcd wait for ready
 
 - name: Create Etcd client key
   community.crypto.openssl_privatekey:
@@ -232,26 +237,35 @@
     csr_path: "{{ etcd_conf_dir }}/pki/client.csr"
     ownca_path: "{{ etcd_conf_dir }}/pki/ca.crt"
     ownca_privatekey_path: "{{ etcd_conf_dir }}/pki/ca.key"
-    entrust_not_after: "+3650d"
+    ownca_not_after: "+3650d"
     provider: ownca
     owner: etcd
     group: etcd
     mode: '0640'
   notify:
     - etcd daemon-restart
+    - etcd wait for ready
 
 - name: Download Etcd binaries
   ansible.builtin.get_url:
     url: https://github.com/etcd-io/etcd/releases/download/v{{ etcd_version }}/etcd-v{{ etcd_version }}-linux-{{ machine_arch_map[ansible_architecture] }}.tar.gz
     dest: /tmp/etcd.tar.gz
     mode: '0644'
-    force: "{{ etcd_force_upgrade }}"
+    force: true
   changed_when: false
   retries: 3
+  check_mode: false
+
+- name: Decompress Etcd binaries
+  community.general.decompress:
+    src: /tmp/etcd.tar.gz
+    dest: /tmp/etcd.tar
+  changed_when: false
+  check_mode: false
 
 - name: Install Etcd binaries
   ansible.builtin.unarchive:
-    src: "/tmp/etcd.tar.gz"
+    src: "/tmp/etcd.tar"
     dest: "/usr/local/bin/"
     remote_src: yes
     owner: root
@@ -266,6 +280,7 @@
       - 1
   notify:
     - etcd daemon-restart
+    - etcd wait for ready
 
 - name: Configure Etcd systemd unit
   ansible.builtin.template:
@@ -276,6 +291,7 @@
     mode: '0644'
   notify:
     - etcd daemon-restart
+    - etcd wait for ready
   register: etcd_systemd_unit_template
 
 - name: daemon-reload

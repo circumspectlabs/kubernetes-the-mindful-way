@@ -4,8 +4,8 @@
 kubernetes_profile: "unspecified" # must be "control-plane", "control-plane-noworker", or "worker"
 kubernetes_control_plane_group_name: control-plane
 
-kubernetes_version: "1.31.3"
-kubernetes_helm_version: "3.16.4"
+kubernetes_version: "1.32.8"
+kubernetes_helm_version: "3.18.5"
 kubernetes_conf_dir: /etc/kubernetes
 kubernetes_sock_dir: /var/run/kubernetes
 kubernetes_log_dir: /var/log/kubernetes
@@ -15,7 +15,7 @@ kubernetes_debug_address: "0.0.0.0"
 kubernetes_force_upgrade: false
 
 ###
-### Non-public IPv4 range (for CGNAT)
+### Non-public IPv4 range (from CGNAT)
 ###
 kubernetes_service_ip_range: 100.64.0.0/12 # ~1M addresses
 kubernetes_cluster_ip_range: 100.80.0.0/12 # ~1M addresses
@@ -123,18 +123,18 @@ proxy_bind_address: "{{ kubernetes_debug_address }}"
 ###
 ### Calico
 ###
-calico_version: "3.30.1"
+calico_version: "3.30.2"
 calico_mock_bpffs: true
 
 ###
 ### Coredns
 ###
-coredns_version: "1.12.0"
+coredns_version: "1.12.2"
 
 ###
 ### Metrics API
 ###
-metrics_version: "0.7.2"
+metrics_version: "0.8.0"
 metric_resolution: 15s
 
 # usage: {{ machine_arch_map[ansible_architecture] }}
@@ -143,3 +143,9 @@ machine_arch_map:
   arm64: arm64
   x86_64: amd64
   amd64: amd64
+
+###
+### The switch disables some things to make it suite for
+### `serial: 1` mode.
+###
+upgrade_mode: false

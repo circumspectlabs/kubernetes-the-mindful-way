@@ -6,7 +6,7 @@ __ARGS_PKI=(
     "--key={{ etcd_conf_dir }}/pki/client.key"
 )
 __ARGS_ENDPOINTS=(
-    "--endpoints={{ play_hosts | map('extract', hostvars) | map(attribute='vlan_ip') | ansible.builtin.product([':2379']) | map('join') | list | join(',') }}"
+    "--endpoints={{ ansible_play_batch | map('extract', hostvars) | map(attribute='vlan_ip') | ansible.builtin.product([':2379']) | map('join') | list | join(',') }}"
     "--dial-timeout=1s"
 )
 

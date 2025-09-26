@@ -118,6 +118,12 @@ platforms:
     ### native performance :)
     ###
     vcpu: "1"
+    ###
+    ### Enable or disable vTPM device. Sometimes it's quite tricky how to make it working on your
+    ### local system, so usually it's disabled by default. There is no Kubernetes features relying
+    ### on this device, it's mostly for experiments.
+    ###
+    tpm: false
   - ###
     ### Let's add more similar nodes, with name override
     ###

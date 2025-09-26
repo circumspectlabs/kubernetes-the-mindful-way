@@ -1,0 +1,16 @@
+###
+### The playbook which CAREFULLY upgrade all components,
+### node by node.
+###
+---
+- name: Prepare to Ansible actions
+  ansible.builtin.import_playbook: playbooks/ansible.yaml
+
+- name: Enforce policies
+  ansible.builtin.import_playbook: playbooks/policies.yaml
+
+- name: Configure control plane nodes
+  ansible.builtin.import_playbook: playbooks/control-plane-upgrade.yaml
+
+- name: Configure worker nodes
+  ansible.builtin.import_playbook: playbooks/workers-upgrade.yaml

@@ -1,3 +1,14 @@
+- name: Download Kubernetes binaries
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: /usr/local/bin/
+    mode: '0755'
+    force: true
+  with_items:
+    - "{{ kubernetes_binary['controller'] }}"
+  notify:
+    - kubernetes controller-manager daemon-restart
+
 - name: Create Kubernetes Controller Manager keys
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"

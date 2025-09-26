@@ -1,12 +1,9 @@
-- name: Validate role settings
+- name: Fail if unknown role/profile
   ansible.builtin.debug:
     msg: |-
-      {% if kubernetes_profile in ["control-plane", "control-plane-noworker", "worker"] %}
-      OK
-      {% else %}
       kubernetes_profile should be one of "control-plane", "control-plane-noworker", or "worker", not "{{ kubernetes_profile }}"
-      {% endif %}
-  failed_when: 'kubernetes_profile not in ["control-plane", "control-plane-noworker", "worker"]'
+  failed_when: 'true'
+  when: 'kubernetes_profile not in ["control-plane", "control-plane-noworker", "worker"]'
   run_once: true
   become: false
 

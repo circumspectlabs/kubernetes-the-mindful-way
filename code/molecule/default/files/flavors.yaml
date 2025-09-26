@@ -22,6 +22,9 @@ amd64:
     "18.04": *x_amd64_ubuntu_bionic
     "18": *x_amd64_ubuntu_bionic
   debian:
+    trixie: &x_amd64_debian_trixie
+      address: https://cdimage.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
+      guest_os: linux
     bookworm: &x_amd64_debian_bookworm
       address: https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
       guest_os: linux
@@ -31,7 +34,8 @@ amd64:
     buster: &x_amd64_debian_buster
       address: https://cdimage.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2
       guest_os: linux
-    latest: *x_amd64_debian_bookworm
+    latest: *x_amd64_debian_trixie
+    "13": *x_amd64_debian_trixie
     "12": *x_amd64_debian_bookworm
     "11": *x_amd64_debian_bullseye
     "10": *x_amd64_debian_buster
@@ -55,35 +59,16 @@ amd64:
     stream: *x_amd64_centos_9
     "8": *x_amd64_centos_8_4
   fedora:
+    "42": &x_amd64_fedora_42
+      address: https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-UEFI-UKI-42-1.1.x86_64.qcow2
+      guest_os: linux
     "41": &x_amd64_fedora_41
       address: https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-UEFI-UKI-41-1.4.x86_64.qcow2
       guest_os: linux
     "40":
       address: https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-UEFI-UKI.x86_64-40-1.14.qcow2
       guest_os: linux
-    latest: *x_amd64_fedora_41
-  alpine:
-    "3.21": &x_amd64_alpine_3_21
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/nocloud_alpine-3.21.2-x86_64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: &x_alpine_settings
-        shell: /bin/sh
-        init_packages:
-          - sudo
-    "3.20":
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/cloud/nocloud_alpine-3.20.5-x86_64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3.19":
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/cloud/nocloud_alpine-3.19.6-x86_64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3.18":
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.18/releases/cloud/nocloud_alpine-3.18.11-x86_64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3": *x_amd64_alpine_3_21
-    latest: *x_amd64_alpine_3_21
+    latest: *x_amd64_fedora_42
 arm64:
   ubuntu:
     noble: &x_arm64_ubuntu_noble
@@ -108,6 +93,9 @@ arm64:
     "18.04": *x_arm64_ubuntu_bionic
     "18": *x_arm64_ubuntu_bionic
   debian:
+    trixie: &x_arm64_debian_trixie
+      address: https://cdimage.debian.org/images/cloud/trixie/latest/debian-13-generic-arm64.qcow2
+      guest_os: linux
     bookworm: &x_arm64_debian_bookworm
       address: https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2
       guest_os: linux
@@ -117,7 +105,8 @@ arm64:
     buster: &x_arm64_debian_buster
       address: https://cdimage.debian.org/images/cloud/buster/latest/debian-10-generic-arm64.qcow2
       guest_os: linux
-    latest: *x_arm64_debian_bookworm
+    latest: *x_arm64_debian_trixie
+    "13": *x_arm64_debian_trixie
     "12": *x_arm64_debian_bookworm
     "11": *x_arm64_debian_bullseye
     "10": *x_arm64_debian_buster
@@ -141,29 +130,13 @@ arm64:
     stream: *x_arm64_centos_9
     "8": *x_arm64_centos_8_4
   fedora:
+    "42": &x_arm64_fedora_42
+      address: https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/aarch64/images/Fedora-Cloud-Base-UEFI-UKI-42-1.1.aarch64.qcow2
+      guest_os: linux
     "41": &x_arm64_fedora_41
       address: https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/aarch64/images/Fedora-Cloud-Base-UEFI-UKI-41-1.4.aarch64.qcow2
       guest_os: linux
     "40":
       address: https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/aarch64/images/Fedora-Cloud-Base-UEFI-UKI.aarch64-40-1.14.qcow2
       guest_os: linux
-    latest: *x_arm64_fedora_41
-  alpine:
-    "3.21": &x_arm64_alpine_3_21
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/nocloud_alpine-3.21.2-aarch64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3.20":
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/cloud/nocloud_alpine-3.20.5-aarch64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3.19":
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/cloud/nocloud_alpine-3.19.6-aarch64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3.18":
-      address: https://dl-cdn.alpinelinux.org/alpine/v3.18/releases/cloud/nocloud_alpine-3.18.11-aarch64-uefi-cloudinit-r0.qcow2
-      guest_os: linux
-      settings: *x_alpine_settings
-    "3": *x_arm64_alpine_3_21
-    latest: *x_arm64_alpine_3_21
+    latest: *x_arm64_fedora_42

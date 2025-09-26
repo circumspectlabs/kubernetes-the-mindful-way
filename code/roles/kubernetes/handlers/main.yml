@@ -7,7 +7,7 @@
     state: restarted
     name: kubernetes-api.service
   listen: kubernetes api daemon-restart
-  timeout: 15
+  timeout: 90
   throttle: 1
 
 - name: Restart Kubernetes Controller Manager service
@@ -15,7 +15,7 @@
     state: restarted
     name: kubernetes-controller-manager.service
   listen: kubernetes controller-manager daemon-restart
-  timeout: 15
+  timeout: 30
   throttle: 1
 
 - name: Restart Kubernetes Scheduler service
@@ -23,7 +23,7 @@
     state: restarted
     name: kubernetes-scheduler.service
   listen: kubernetes scheduler daemon-restart
-  timeout: 15
+  timeout: 30
   throttle: 1
 
 - name: Restart Kubelet service
@@ -31,7 +31,7 @@
     state: restarted
     name: kubelet.service
   listen: kubernetes kubelet daemon-restart
-  timeout: 15
+  timeout: 45
   throttle: 1
 
 - name: Restart Kubernetes Proxy service
@@ -39,5 +39,5 @@
     state: restarted
     name: kubernetes-proxy.service
   listen: kubernetes proxy daemon-restart
-  timeout: 15
+  timeout: 30
   throttle: 1

@@ -68,7 +68,8 @@
         name: "{{ item_name }}"
         command: "undefine"
         uri: "{{ libvirt_uri }}"
-        force: true
+        flags:
+          - nvram
       loop: *x_instances_loop
       loop_control: *x_instances_loop_control
       vars: *x_instances_vars

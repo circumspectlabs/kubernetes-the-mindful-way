@@ -21,6 +21,7 @@
     default_disk_size: "10G"
     default_memory_size: "2G"
     default_vcpu: "1"
+    default_tpm: false
     molecule_network_directory: "{{ molecule_ephemeral_directory }}/network"
     molecule_temp_folder: "{{ molecule_ephemeral_directory }}/tmp"
     molecule_private_key_path: "{{ molecule_ephemeral_directory }}/id_ecdsa"
@@ -197,6 +198,7 @@
         item_uefi_firmware_code: "{{ lookup('ansible.builtin.pipe', script_detect_uefi_firmware_code) }}"
         item_uefi_firmware_vars_template: "{{ lookup('ansible.builtin.pipe', script_detect_uefi_firmware_vars_template) }}"
         item_uefi_firmware_vars: "{{ molecule_ephemeral_directory }}/{{ item_name }}/uefi-vars.fd"
+        item_tpm: "{{ item.tpm | default(default_tpm) }}"
 
     ###
     ### Image

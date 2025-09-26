@@ -1,0 +1,24 @@
+###
+### This playbook enables the Kubernetes workers.
+###
+---
+- hosts: worker
+  serial: 1 #  <<<  apply changes one by one
+  become: true
+  roles:
+    - role: containerd
+    - role: kubernetes
+      vars:
+        kubernetes_profile: worker
+        kubelet_max_pods: 300
+        labels: {}
+        taints: []
+        ###
+        ### In addition, you need to specify the control plane
+        ### group name. This is necessary for getting certificates
+        ### and other settings from control plane.
+        ### This value depends on your inventory.
+        ###
+        kubernetes_control_plane_group_name: control-plane
+  vars:
+    upgrade_mode: true #  << important flag handles "serial" flag specific cases

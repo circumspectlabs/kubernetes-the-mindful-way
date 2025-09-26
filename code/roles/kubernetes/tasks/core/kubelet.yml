@@ -1,3 +1,14 @@
+- name: Download Kubernetes binaries
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: /usr/local/bin/
+    mode: '0755'
+    force: true
+  with_items:
+    - "{{ kubernetes_binary['kubelet'] }}"
+  notify:
+    - kubernetes kubelet daemon-restart
+
 - name: Ensure Kubelet directories exist
   ansible.builtin.file:
     path: "{{ item }}"

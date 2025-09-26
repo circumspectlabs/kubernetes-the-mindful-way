@@ -5,6 +5,25 @@
 ### access to necessary files and can build kubeconfig
 ### manually).
 ###
+- name: Download Kubernetes binaries
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: /usr/local/bin/
+    mode: '0755'
+    force: true
+  with_items:
+    - "{{ kubernetes_binary['kubectl'] }}"
+
+- name: Create kubectl completions
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - |-
+        kubectl completion bash > /etc/bash_completion.d/kubectl
+        chmod 644 /etc/bash_completion.d/kubectl
+    creates: /etc/bash_completion.d/kubectl
+
 - name: Ensure "~/.kube" directory exists
   ansible.builtin.file:
     path: "{{ item.home | default('/home/' + item.user) }}/.kube"

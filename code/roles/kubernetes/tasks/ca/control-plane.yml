@@ -46,6 +46,7 @@
     - filename: aggregator-ca.key     # CA: API through aggregator
     - filename: kubelet-ca.key        # CA: kubelets
   run_once: true
+  when: 'not upgrade_mode'
 
 - name: Kubernetes API CA
   block:
@@ -71,6 +72,7 @@
         group: control-plane
         mode: '0644'
   run_once: true
+  when: 'not upgrade_mode'
 
 - name: Kubernetes Aggregator CA
   block:
@@ -96,6 +98,7 @@
         group: root
         mode: '0644'
   run_once: true
+  when: 'not upgrade_mode'
 
 - name: Kubelet CA
   block:
@@ -121,6 +124,7 @@
         group: root
         mode: '0644'
   run_once: true
+  when: 'not upgrade_mode'
 
 - name: Create service account key
   community.crypto.openssl_privatekey:
@@ -131,6 +135,7 @@
   loop:
     - service-account.key
   run_once: true
+  when: 'not upgrade_mode'
 
 - name: Get Kubernetes CA files
   ansible.builtin.slurp:
@@ -147,13 +152,13 @@
   run_once: true
 
 - ansible.builtin.set_fact:
-    ca_crt: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
-    ca_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
-    aggregator_ca_crt: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'aggregator-ca.crt') | map(attribute='content') | first | b64decode }}"
-    aggregator_ca_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'aggregator-ca.key') | map(attribute='content') | first | b64decode }}"
-    kubelet_ca_crt: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.crt') | map(attribute='content') | first | b64decode }}"
-    kubelet_ca_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.key') | map(attribute='content') | first | b64decode }}"
-    service_account_key: "{{ hostvars[play_hosts[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'service-account.key') | map(attribute='content') | first | b64decode }}"
+    ca_crt: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.crt') | map(attribute='content') | first | b64decode }}"
+    ca_key: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'ca.key') | map(attribute='content') | first | b64decode }}"
+    aggregator_ca_crt: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'aggregator-ca.crt') | map(attribute='content') | first | b64decode }}"
+    aggregator_ca_key: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'aggregator-ca.key') | map(attribute='content') | first | b64decode }}"
+    kubelet_ca_crt: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.crt') | map(attribute='content') | first | b64decode }}"
+    kubelet_ca_key: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'kubelet-ca.key') | map(attribute='content') | first | b64decode }}"
+    service_account_key: "{{ hostvars[ansible_play_batch[0]].kubernetes_slurp.results | selectattr('item', 'equalto', 'service-account.key') | map(attribute='content') | first | b64decode }}"
 
 - name: Put Kubernetes CA files
   ansible.builtin.copy:

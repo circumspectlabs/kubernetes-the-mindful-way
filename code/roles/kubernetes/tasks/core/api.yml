@@ -1,3 +1,14 @@
+- name: Download Kubernetes binaries
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: /usr/local/bin/
+    mode: '0755'
+    force: true
+  with_items:
+    - "{{ kubernetes_binary['api'] }}"
+  notify:
+    - kubernetes api daemon-restart
+
 - name: Create Kubernetes API keys
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_conf_dir }}/pki/{{ item }}"

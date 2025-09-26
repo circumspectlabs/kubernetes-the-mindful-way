@@ -126,9 +126,11 @@
       <output bufferCount="42"/>
     </audio>
     <!-- Misc -->
+{% if item_tpm %}
     <tpm model='tpm-tis'>
       <backend type='emulator' version='2.0'/>
     </tpm>
+{% endif %}
     <rng model='virtio'>
       <backend model='random'>/dev/urandom</backend>
     </rng>
