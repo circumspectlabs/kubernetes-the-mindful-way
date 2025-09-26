@@ -78,6 +78,7 @@ provisioner:
     OBJC_DISABLE_INITIALIZE_FORK_SAFETY: "YES"
   playbooks:
     converge: ../../main.yaml
+    # converge: ../../upgrade.yaml
     verify: ../../tests.yaml
   config_options:
     defaults:

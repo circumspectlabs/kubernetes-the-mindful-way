@@ -4,7 +4,7 @@
 kubernetes_profile: "unspecified" # must be "control-plane", "control-plane-noworker", or "worker"
 kubernetes_control_plane_group_name: control-plane
 
-kubernetes_version: "1.32.8"
+kubernetes_version: "1.33.5"
 kubernetes_helm_version: "3.18.5"
 kubernetes_conf_dir: /etc/kubernetes
 kubernetes_sock_dir: /var/run/kubernetes
