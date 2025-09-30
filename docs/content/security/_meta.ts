@@ -2,8 +2,8 @@ export default {
   "baseline": {
     title: "Security Baseline",
   },
-  "certificate-authorities": {
-    title: "Certificate Authorities",
+  "tls": {
+    title: "SSL/TLS Deep Dive",
   },
   "rbac": {
     title: "RBAC",

@@ -1,0 +1,296 @@
+---
+description: "This page reveals some details about TLS parameters and configuration of Kubernetes components, with the special attention to the security of that."
+---
+import { Callout } from 'nextra/components';
+import Image from 'next/image';
+
+# SSL/TLS Deep Dive
+
+This page reveals some details about TLS parameters and configuration of
+Kubernetes components, with the special attention to the security of that.
+
+Most of the real world cyberattacks start from a misconfigured interface or
+misunderstood protocol. In order to run Kubernetes cluster security, you
+must understand how they work internally, and the same necessity for the
+exploitation of that.
+
+It's useful to know about [Control Plane](/architecture/control-plane)
+components and their areas of responsibility.
+
+## OSI (Network Stack Layers)
+
+Almost all interactions with Kubernetes interfaces are based on HTTPS
+protocol. That means that L5-L7 is represented as client-server protocol with
+SSL/TLS encryption and based on some version of HTTP protocol (with
+websockets as an extension for streaming data). You should also understand
+that this communication is based on less common features of these protocols.
+Let's walk through:
+
+* SSL/TLS is always enabled for such communication, and your can identify
+the server by its certificate. However, for some cases, you also need to
+use authentication by certificate (client-side TLS certificate). This is
+known as mutual TLS, and it requires using (and understanding) of certificate
+authority(ies). This is not an only way to authenticate clients.
+
+* Almost every component has an HTTP client and usually HTTP server
+implementation, usually it's the native Go libraries. When they have a
+vulnerability, the Kubernetes components are also has such vulnerability.
+
+* Kubernetes endpoints are usually integrated with authentication/authorization
+system, practically it's RBAC for almost 100% cases.
+
+* You can use external authentication services (OAuth integration), but only
+internal authorization systems from the available list (RBAC, Node, and a few
+rarely used or obsolete controller types).
+
+* Kubernetes API component: every communication with this HTTPS server is
+recorded in audit log (if enabled). This log includes even internal requests,
+like from deployments controller (in controller-manager component) and from
+your CNI controller.
+
+## SSL/TLS layer
+
+As already mentioned above, Kubernetes communication protocols strongly rely
+upon TLS layer. It's made by at least 2 reasons: encryption in transit and
+authentication.
+
+### Encryption in Transit
+
+Most of all communication enforce TLS at least by server side (requested by
+server party, but applies encryption for both incoming and outgoing streams).
+However, there are a couple of endpoints, which don't require that: usually
+internal metrics and healthcheck endpoints, separated to different listening
+port. And they don't provide any sensitive data about cluster neither
+particular components.
+
+<Callout type="info">
+The official pages and `--help` of components usually requires to make ALL
+endpoints available for ALL basic cluste components. Practically, it's not
+necessary, and there are a couple of necessary communication and a couple of
+necessary only for feature communication.
+</Callout>
+
+While establishing TLS session with some of cluster components' interface,
+you need to ensure that you communicate with the correct party, that it's
+not someone else (prevent MITM attacks). It's made by foundational approach
+of certificate authorities. You issue key and self-signed certificate, but
+don't use these directly as `--tls-cert-file` and `--tls-private-key-file`
+arguments for your components. Then, you can use the self-signed certificate
+to verify if the second certificate was signed by the first one. That's how
+CA (certificate authorities) are made.
+
+Of course, it's not that simple in practice. There are x509v3 extensions
+which are very common and define how you can use the certificate: as a
+client, as server, as code signing (there are such, however it's out of
+scope of this page), else. Most of all TLS communication are restricted
+with another common rule: CN (common name) and SAN (subject alternative
+name) enforcement requires the destination address (FQDN or IP address) to
+be presented in the certificate.
+
+```bash
+# Init CA
+openssl ecparam -genkey -out ca.key -name secp521r1
+openssl req -x509 -new -key ca.key -days 10000 -out ca.crt -subj "/CN=Kubernetes The Mindful Way - Test CA"
+openssl x509 -noout -text -in ca.crt
+
+# Create and sign server certificate
+openssl ecparam -genkey -out server.key -name secp521r1
+openssl req -new -key server.key -out server.csr \
+    -subj "/CN=server" \
+    -addext "basicConstraints=CA:false" \
+    -addext "keyUsage=digitalSignature" \
+    -addext "extendedKeyUsage=serverAuth" \
+    -addext "subjectAltName = IP:192.0.2.254, DNS:example, DNS:example.local, DNS:localhost"
+openssl x509 -req -CA ca.crt -CAkey ca.key -days 3650 -CAcreateserial \
+    -copy_extensions copy \
+    -in server.csr -out server.crt
+openssl x509 -noout -text -in server.crt
+
+# Create and sign client certificate
+openssl ecparam -genkey -out client.key -name secp521r1
+openssl req -new -key client.key -out client.csr \
+    -subj "/CN=client" \
+    -addext "basicConstraints=CA:false" \
+    -addext "keyUsage=digitalSignature" \
+    -addext "extendedKeyUsage=clientAuth"
+openssl x509 -req -CA ca.crt -CAkey ca.key -days 3650 -CAcreateserial \
+    -copy_extensions copy \
+    -in client.csr -out client.crt
+openssl x509 -noout -text -in client.crt
+
+# NOTE: for peer certificate, it should be
+# with "extendedKeyUsage=clientAuth,serverAuth"
+```
+
+### Mutual TLS
+
+There is more complex case of TLS communication: when client is also
+provides key and certificate which also signed by certificate authority
+to make server able to verify that the client is allowed to communicate.
+This is how some modern VPNs work too.
+
+Client and server certificates are pretty similar, similarly issued, and
+differ only with flags `clientAuth` and `serverAuth` in the body of the
+certificate. You can also provide both flags (making it a peer certificate),
+but it's not recommended
+
+<Callout type="info">
+Peer certificates are useful for `etcd` peering, but there is no place where
+it could be helpful for Kubernetes.
+</Callout>
+
+SSL/TLS certificates have a really useful property: as soon as it's signed,
+no one can change the data in this certificate without corrupting the
+signature. So, once you signed a certificate and provided it to remote
+party, you can always ensure that the data in the certificate are the same
+as was during the signing procedure. That's why Kubernetes uses Common Name
+of the client certificate as the identity for authorization process. Yes,
+Kubernetes API can extract Common Name from client certificate and pass it
+from OSI L5-6 (session and presentation) to OSI L7 (application), to check
+what permissions it has (usually via RBAC).
+
+## Certificate Authorities
+
+Kubernetes has at least 4+ non-intersecting certificate authorities. Yes, that
+many! The most important word here is "non-intersecting", thus you need to
+maintain 4 different private keys and self-signed certificates, and every pair
+signs multiple other private keys and certificates.
+
+### Kubernetes API CA
+
+The most commonly used interface, for cluster components and users. Almost
+everything related to the Kubernetes cluster ecosystem communicates via this
+interface. The server side is on `kubeapi` component, and clients are
+`controller-manager`, `scheduler`, `kubelet`, `kube-proxy`, `metrics-server`,
+cluster DNS (usually CoreDNS), CNI, just `kubectl` and other client utilities,
+and many other things.
+
+<Callout type="error" emoji={null}>
+Ones who have access to this CA are able to issue any identity, thus can
+take over the cluster. It is basically the most simple way to elevate
+permissions from "pod/create" to full permissions. You can create a pod
+on a control plane node (usually requires specifying tolerations) with
+the specific `hostPath` mount, then take files from the corresponding
+directory, and then use it to signing a new certificate with the specific
+parameters.
+</Callout>
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/tls_api_ca.png" alt="Kubernetes architecture functional diagram" width={800} height={500} />
+</div>
+
+### Kubelet CA
+
+As you already know, `kubelet` is the main component of worker node (ether
+it simultaneously serves as a control plane node or not). And `kubelet` also
+has an HTTPS interface (usually on `:10250`) which is mainly for `kubeapi`
+and `metrics-server` components, sometimes for CNI too.
+
+Unlike Kubernetes API, Kubelet API doesn't have RBAC or any advanced
+authorization system. It always requires client TLS certificate and allows
+everything if the client certificate is signed by appropriate CA and suites
+by x509v3 parameters (basically `clientAuth` flag should be present). This is
+the only and enough reason not intersecting Kubernetes API CA and Kubelet API
+CA.
+
+<Callout type="error" emoji={null}>
+In case of stolen `clientAuth` certificate, attacker can communicate with
+Kubernetes nodes directly. If you run workloads on control plane nodes, the
+scope of breach is the whole cluster, if you don't, then only worker nodes.
+
+If you use the same CA for both Kubernetes API and Kubelet API, there is
+another attack vector for your cluster. You can use just ANY Kubernetes API
+client certificate for requesting Kubelet API, regardless of permissions
+defined with RBAC.
+</Callout>
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/tls_kubelet_ca.png" alt="Kubernetes architecture functional diagram" width={800} height={500} />
+</div>
+
+### Aggregator CA
+
+This certificate authority is less frequently used, but still necessary for
+admission controller and some specific features.
+
+For components `kubeapi`, `controller-manager`, and `kube-scheduler`, you must
+specify argument `--requestheader-client-ca-file` with the path to Aggregator CA
+certificate file (self-signed). This is related to the special "proxy" mode which
+enables impersonation for calls into Kubernetes API. Instead of using common
+authorization (with certificate's common name or JWT token), the requests
+made with a client certificate signed by Aggregator CA take the identity
+information from HTTP headers like `X-Remote-User`, `X-Remote-Group`, and
+`X-Remote-Extra-`. So, Aggregator CA can bypass authentication system, and it's
+very useful for specific cases.
+
+In addition, this CA certificate (provided with `--requestheader-client-ca-file`)
+is exposed in `kube-system` namespace in `extension-apiserver-authentication`
+ConfigMap. It is expected that other components also follow this "impersonation"
+behavior. For example, `APIServer` objects can extend Kubernetes API and their
+handlers should check incoming requests with this CA certificate. The most common
+example here is `metrics-server` ([details](https://kubernetes.io/docs/tasks/extend-kubernetes/setup-extension-api-server/)).
+
+You must specify `--requestheader-client-ca-file` for `kubeapi`,
+`controller-manager`, and `kube-scheduler`. In addition, you need to specify
+`--proxy-client-cert-file` and `--proxy-client-key-file` with the key/certificate
+signed by Aggregator CA (with `clientAuth` flag), because it's used for
+communication with admission controller servers.
+
+<Callout type="error" emoji={null}>
+Using this CA or even issued certificate with `clientAuth` flag, it's pretty
+easy to elevate permissions in cluster.
+
+In case you mix this CA with Kubernetes API CA or Kubelet API CA, the specially
+made request with the client TLS certificate (taken from kubeconfig or from
+`metrics-server` pod) can grant you practically unlimited access to the cluster
+API.
+</Callout>
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/tls_aggregator_ca.png" alt="Kubernetes architecture functional diagram" width={500} height={500} />
+</div>
+
+### Service Account CA
+
+Unlike to enlisted above CAs, this is the special one. `kubeapi` component uses it
+for issuing and verifying JWT tokens of service accounts. As well as authentication
+with client TLS certificate, there is a more trivial authentication similar to
+OAuth, with JWT token in HTTP header. Service accounts are the basic way to grant
+permissions to Kubernetes API for workloads in cluster.
+
+This is the simplest CA in the cluster, because requires only private and public
+keys.
+
+<Callout type="error" emoji={null}>
+This CA controls the authentication process, so with the stolen keys you can craft
+any identity in the cluster.
+
+In terms of mixing this CA with others: it's quite unclear the way to exploit
+Kubernetes API with that. However, it's still not recommended. Just maintain it
+separately.
+</Callout>
+
+### Etcd CA
+
+Bonus section: Etcd CA(s).
+
+It's not directly related to Kubernetes cluster, however Kubernetes heavily depends
+on it, so it's also worth to discuss it.
+
+Any etcd cluster should have at least 2 CA: for peering (communication between
+members) and for Etcd API.
+
+Peering CA is trivial: no RBAC, no complex authentication, just allows running TLS
+server on ":2380" and connect to it, allowing any incoming connection with a signed
+by Peering CA certificate.
+
+Etcd API is more complex, but also requires TLS certificate for connection. It may
+have RBAC depending on settings, but usually doesn't have for Kubernetes case. What's
+important here: Kubernetes API receives Etcd client TLS key, certificate, and CA with
+`--etcd-keyfile`, `--etcd-certfile`, and `--etcd-cafile`.
+
+<Callout type="error" emoji={null}>
+Etcd is the "objects storage" of the Kubernetes API. With Etcd API key/cert you can
+arbitrary change Kubernetes data. With a valid Etcd Peering certificate, it's a bit
+more complex, but still possible.
+</Callout>
