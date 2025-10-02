@@ -5,8 +5,11 @@ export default {
   "tls": {
     title: "SSL/TLS Deep Dive",
   },
-  "rbac": {
-    title: "RBAC",
+  "authentication": {
+    title: "Authentication",
+  },
+  "authorization": {
+    title: "Autorization",
   },
   "policy-engines": {
     title: "Policy Engines",
