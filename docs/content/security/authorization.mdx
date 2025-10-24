@@ -1,14 +1,19 @@
 ---
 description: "The goal of this page is streamlining the knowledge about the authorization subsystem of Kubernetes clusters"
 ---
+import { Callout } from 'nextra/components';
+import Image from 'next/image';
+
 # Authorization
 
 There are a lot of pages which explain how Kubernetes RBAC works and
 how to configure it. Moreover, [the official page](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
 is quite good and covers all necessary details. However, most of all
 pages ignore the fact that RBAC is only one of the permission controllers
-in a common Kubernetes cluster. That makes the dangerous condition
-when engineers don't fully understand how it works.
+in a common Kubernetes cluster, as well as the fact that different
+components have their own authorization routines. That makes the dangerous
+condition when engineers don't fully understand how authorization works
+out for all components.
 
 The goal of this page is streamlining the knowledge about the authorization
 subsystem of Kubernetes clusters, either cloud-located or on-premise
@@ -16,27 +21,36 @@ ones. It doesn't duplicate [the official page](https://kubernetes.io/docs/refere
 it reorganizes the knowledge and practice in single place with simple
 words.
 
+## Authorization Flow
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/auth_flow.png" alt="Kubernetes authentication and authorization flow" width={800} height={500} />
+</div>
+
 ## Not only Kubernetes API
 
-It's important to understand that even RBAC works not only for the main
-Kubernetes API, it also works for APIs of `controller-manager` and even
-for `kubelet`. Another important thing: there are MULTIPLE permission
-controllers. For most of all cases, either cloud or on-premise, it's
-`Node` and `RBAC` controllers (the order is correct).
+As mentioned before, authorization works not only for the main Kubernetes
+API, it also works for APIs of `controller-manager` and even for `kubelet`.
+Another important thing: there are MULTIPLE permission controllers. For most
+of all the cases, either cloud or on-premise, it's `Node` and `RBAC`
+controllers.
 
 Let's enumerate all services which have any kind of authorization:
 
-* **Kubernetes API**. It usually has Node (for kubelet authorization) and
-RBAC (for everything else). It can be configured with `kube-apiserver`
+* **Kubernetes API**. It usually has `Node` (for `kubelet` authorization)
+and `RBAC` (for everything else). It can be configured with `kube-apiserver`
 component, with `--authorization-mode=Node,RBAC` flag.
+
 * **Internal Endpoints**, such as `controller-manager`, `scheduler`, and
 `kube-proxy`'s APIs. They use `Webhook` authorization model, so they always
 forward incoming request to Kubernetes API which has its own authorization
 configuration.
-* **Kubelet API** has it's own configuration for authorization, in the
+
+* **Kubelet API** has its own configuration for authorization, in the
 `kubelet` configuration file. Practically, it is "allow-any" for sessions
 initiated with client TLS certificate signed by [Kubelet CA](/security/tls#kubelet-ca)
-and with `Webhook` to Kubernetes API.
+and with `Webhook` to Kubernetes API for all other cases with bearer token
+and TLS client certificate signed by the common Kubernetes API CA.
 
 We can consider that only `kube-apiserver` has authorization controller(s),
 and all other components can delegate this function to it with `Webhook`,
@@ -50,21 +64,33 @@ All available options, from the most common to less popular:
 * **RBAC**. This controller always checks if the identity allowed to perform
 the request by the objects of `rbac.authorization.k8s.io`. These are well
 known `Role`, `ClusterRole`, `RoleBinding`, and `ClusterRoleBinding`.
+
 * **Node**. Every `kubelet` has a special identity, and old versions of
-Kubernetes used RBAC to grant access to `Pods`, `Secrets`, `Volumes`,
+Kubernetes used `RBAC` to grant access to `Pods`, `Secrets`, `Volumes`,
 etc. The `Node` controller restricts the available objects only if they
 assigned to the corresponding `Node`. For example, using this controller
 you provide the access to the `Secret` of assigned `Pod`, but all requests
 to non-related objects are denied.
+
 * **ABAC** is Attribute-based access controller. It allows creating of
 simple policies for specific cases.
-* **Webhook** only delegated the authorization procedure to external
+
+* **Webhook** only delegates the authorization procedure to external
 service. As mentioned above, it's commonly used by `controller-manager`,
 `scheduler`, and `kubelet`. However, you can use one `kube-apiserver`
 as the authorization backend for another `kube-apiserver` (although the
 use case is really unclear).
+
 * **AlwaysAllow** and **AlwaysDeny** are catch-all policies. They are useful
 for edge cases (e.g. when you need to recover broken system RBAC rules).
+
+<Callout type="info">
+`Webhook` method doesn't simply forward the request, it uses the specific
+call `SubjectAccessReview` which contains `User` and `Groups` metadata
+from the original request.
+You can implement your own custom authorization just by implementing the
+similar `SubjectAccessReview` API.
+</Callout>
 
 ## Desired Configuration
 
@@ -73,24 +99,33 @@ suites to the security requirements. Every organization identifies their own
 policies for that, but there are common standards and practices. The proposed
 below configuration is designed for 99% of common cases.
 
-The basic access controller should be RBAC, because of:
+The basic access controller should be `RBAC`, because:
 
 * This is the most common and the most supported controller. For thousands of
-vendor and community charts, there are lots of `rbac.authorization.k8s.io`
-objects, and almost no `abac.authorization.k8s.io` objects. So, practically
-it's the only way to enable access contols for your Kubernetes clister
-directly from maintainers of the application.
-* RBAC is utterly flexible, can handle even very complex cases with
+vendors and community charts, there are lots of `rbac.authorization.k8s.io`
+objects. For `abac.authorization.k8s.io` you must enable policies in a specific
+file (specified for `kube-apiserver` with `--authorization-policy-file`). So,
+practically it's the only way to enable access controls for your Kubernetes
+cluster directly from maintainers of the application.
+
+* `RBAC` is utterly flexible, can handle even very complex cases with
 identities and group-based access controls.
-* `kube-apiserver` can use multiple controllers for the same request (using
-boolean ON strategy, thus any controller should accept). For complex cases
-which RBAC cannot cover, you can enable extra controllers (`Node` and
-`Webhook`). `Node` is recommended to enable (before `RBAC`, because there
-are cases when RBAC allowed the request but `Node` wouldn't do).
+
+* `kube-apiserver` can use multiple controllers for the same request. It
+performs checks of controllers one by one, controllers answer with ACCEPT (allow
+now), DENY (disallow now), or PASS ("ask the next controller in list"). For
+complex cases which `RBAC` cannot cover, you can enable extra controllers
+(`Node` and `Webhook`). `Node` is recommended to enable before `RBAC`, because
+there are cases when `RBAC` can allow the request but `Node` wouldn't do.
 
 Finally, you the best way to configure it is using `--authorization-mode=Node,RBAC`
 for `kube-apiserver` and initialize it with [specific set of minimal rules](https://github.com/circumspectlabs/kubernetes-the-mindful-way/tree/main/code/roles/kubernetes/files).
 For all other components, prefer to use `Webhook` delegation.
+
+<Callout type="error">
+ALWAYS specify `--authorization-mode` argument for `kube-apiserver`. If you
+don't, then it defaults to `AlwaysAllow` which allows anonymous access.
+</Callout>
 
 ### RBAC
 
@@ -98,15 +133,18 @@ If we were talking about short and accurate explanation of how it works,
 we would need to walk through the following points:
 
 * Authorization provides at least the identity name (e.g. `someone`,
-`someone@from.oauth`, `system:node:nodename`, `system:serviceaccount:ns:sa`,
-etc) and list of group names (zero or more of strings like `system:authorized`,
-`custom-group`, `system:nodes`, `system:serviceaccounts:namespace`, etc). They
+`someone@from.oauth`, `system:node:<nodename>`, `system:serviceaccount:<namespace>:<sa_name>`,
+etc.) and list of group names (zero or more of strings like `system:authorized`,
+`custom-group`, `system:nodes`, `system:serviceaccounts:namespace`, etc.). These
 are the subjects of roles.
+
 * Roles are the lists of rules, and same as all objects, they can be
 cluster-scoped (`ClusterRole`) and namespace-scoped (`Role`).
+
 * Roles do nothing until you attach them to subjects with `ClusterRoleBinding`
-and `RoleBinding`.
-* RBAC has "aggregated" roles: it collects other roles by labels and applies
+and `RoleBinding` (except aggregated roles).
+
+* `RBAC` has "aggregated" roles: it collects other roles by labels and applies
 all of them to the new role.
 
 [The official documentation](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
@@ -137,3 +175,82 @@ however it's very likely doesn't make sense unless you embed extra functionality
 `kubelet`.
 
 Read more about it [here](https://kubernetes.io/docs/reference/access-authn-authz/node/).
+
+### Webhook (delegated)
+
+This is a delegating authorization controller. Every time it performs authorization
+check, it performs the `SubjectAccessReview` request to specified endpoint. For
+components like `kubelet` and `controller-manager`, it performs this request to
+the endpoint configured in `kubeconfig` (practically, it's `kube-apiserver`).
+
+`Webhook` authorization controller is also a way to implement your own custom
+authorization system. You can configure it for `kube-apiserver` too, with
+`--authorization-webhook-config-file` argument.
+
+## Debugging Authorization
+
+For less experienced Kubernetes maintainers, RBAC and the whole authorization
+system appears complex and tricky. Sometimes it's necessary to debug it somehow,
+so here is the list of the most useful commands which reveal how it works:
+
+* You can perform a `SubjectAccessReview` request for any entity
+
+```bash
+BODY="$(cat <<EOF
+{
+  "spec": {
+    "username": "oidc:entra:user:user@example.dev",
+    "groups": [
+      "oidc:entra:55555555-0000-0000-0000-000000000001",
+      "oidc:entra:55555555-0000-0000-0000-000000000002",
+      "system:authenticated"
+    ],
+    "resourceAttributes": {
+      "verb": "get",
+      "resource": "service",
+      "namespace": "default"
+    }
+  }
+}
+EOF
+)"
+kubectl create --raw /apis/authorization.k8s.io/v1/subjectaccessreviews -f - <<< "${BODY}" | \
+  jq .
+```
+
+Example of output (independent of controller):
+
+```json
+{
+  ...
+  "status": {
+    "allowed": true,
+    "reason": "RBAC: allowed by ClusterRoleBinding \"my-crb\" of ClusterRole \"my-cr\" to Group \"oidc:entra:55555555-0000-0000-0000-000000000002\""
+  }
+}
+```
+
+* If you want to analyze your own permissions, you can try one of these
+commands. However, you must have the permissions to call `SubjectAccessReview`:
+
+```bash
+~$ kubectl auth can-i get services
+yes
+~$ kubectl auth can-i watch pods
+yes
+~$ kubectl auth can-i sell kidney
+Warning: the server doesn't have a resource type 'kidney'
+
+Warning: verb 'sell' is not a known verb
+
+yes
+```
+
+* Same as for authentication, you can watch the similar details in the
+audit log.
+
+## Quick Summary
+
+The main principle is that authorization system ingests `User` and `Groups`
+metadata and asks authorization controllers one-by-one, until it answers
+with ACCEPT or DENY. Simple as a cake.

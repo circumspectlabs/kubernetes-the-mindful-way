@@ -1,6 +1,357 @@
 ---
-description: "TODO"
+description: "This pages explains how Kubernetes authentication works out and several internals of this system"
 ---
+import Image from 'next/image';
+
 # Authentication
 
-TODO
+Authentication is the most important security frontier of Kubernetes
+clusters. All communication with all Kubernetes components, internal and
+external, passes through some kind of authentication.
+
+This page is a must-read for everyone involved to cluster administration
+and designing because explains the essential part of secure operation
+of Kubernetes clusters.
+
+## Authentication Flow
+
+<div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+  <Image src="/auth_flow.png" alt="Kubernetes authentication and authorization flow" width={800} height={500} />
+</div>
+
+The only goal of authentication system is identifying the request metadata
+for the further authorization process. It has a kind of "interface": the
+authentication subsystem should provide `User` and `Groups` values. For
+delegated authorization (`Webhook`), it can also consume other details.
+
+Kubernetes has a powerful and flexible authentication system, suitable
+to the overwhelming number of cases. Practically, clusters are usually
+configured to use multiple authentication schemas. To understand how they
+work, you need to find out how they identify `User` and `Groups` by the
+request.
+
+The full list of authentication schemas of `kube-apiserver`:
+
+* TLS client certificate
+* Bearer JWT token
+* External OAuth
+* Webhook (delegated)
+
+Other components can only use TLS client certificate or `Webhook` for
+authentication. For example, when you directly request `kubelet` without
+TLS client certificate but with bearer token, it initiates `TokenReview`
+(authentication webhook) to `kube-apiserver` specified in the configured
+`kubeconfig`, and then `SubjectAccessReview` (authorization webhook).
+If you request with TLS client certificate, it only performs
+`SubjectAccessReview` (authorization).
+
+### TLS client certificate
+
+When you communicate with Kubernetes API, you can provide TLS client
+certificate. It is usually optional. When you provide this certificate,
+Kubernetes API takes `CN` (common name of the certificate's subject) as
+`User` and `O` (organization name of the certificate's subject) as the
+only entry of `Groups` list.
+
+The most useful example is how `kubelet` communicates with Kubernetes
+API. It usually configured with the client TLS certificate like this:
+
+```text
+$ openssl x509 -noout -text -in kubelet-client.crt
+Certificate:
+    Data:
+        ...
+        Issuer: CN = kubernetes-ca
+        Validity
+            Not Before: Jan 1 00:00:00 2025 GMT
+            Not After : Jan 1 00:00:00 2035 GMT
+        Subject: O = system:nodes, CN = system:node:control-plane-1
+        ...
+        X509v3 extensions:
+            ...
+            X509v3 Extended Key Usage:
+                TLS Web Client Authentication
+        ...
+```
+
+For this particular client certificate, the authentication responds with
+`User = system:node:control-plane-1` and `Groups = [ system:nodes, system:authenticated ]`
+and passes it to authorization flow (usually `Node` or `RBAC`, but it
+depends on the particular configuration).
+
+TLS authentication is useful for the cases when you should avoid using
+`ServiceAccount`s: practically, when you configure access to Kubernetes
+API for not-in-cluster service or remote controllers (like CI/CD secret).
+
+If you want to know more about TLS internals in Kubernetes, follow here:
+[TLS Deep Dive](/security/tls.mdx).
+
+### Bearer JWT token
+
+Another authentication schema is the oldest one. `kube-apiserver` issues
+its own JWT tokens to use them as secrets for `ServiceAccount`s (mainly).
+The tokens can be temporary (short-lived) and permanent. Short-lived
+tokens are usually slightly longer than 1 hour.
+
+For the BOTH types of tokens, it takes `.sub` as `User` and
+sets `Groups = [ system:authenticated, system:serviceaccounts, system:serviceaccounts:${NAMESPACE} ]`.
+However, temporary and permanent tokens have different JSON structure.
+
+The example of temporary token:
+
+```json
+// jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "$JWT"
+{
+  "aud": [
+    "https://kubernetes.default.svc.cluster.local"
+  ],
+  "exp": 1792605611, // exp - iat = 3600
+  "iat": 1761069611,
+  "iss": "https://kubernetes.default.svc.cluster.local",
+  "jti": "0e5782df-bed4-445c-a2fc-c342fbef0de6",
+  "kubernetes.io": {
+    "namespace": "kube-system",
+    "node": {
+      "name": "control-plane-1",
+      "uid": "6e759857-97ed-4d26-b76a-c084ebb6ff9f"
+    },
+    "pod": {
+      "name": "calico-node-b79nw",
+      "uid": "25747426-4d0a-487a-99b7-ffa351b39e86"
+    },
+    "serviceaccount": {
+      "name": "calico-node",
+      "uid": "26cd2edc-9942-43b6-93b3-06d292ecef0f"
+    },
+    "warnafter": 1761073218
+  },
+  "nbf": 1761069611,
+  "sub": "system:serviceaccount:kube-system:calico-node" // User
+}
+```
+
+The example of permanent token:
+
+```json
+// jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "$JWT"
+{
+  "iss": "kubernetes/serviceaccount",
+  "kubernetes.io/serviceaccount/namespace": "kube-system",
+  "kubernetes.io/serviceaccount/secret.name": "calico-node",
+  "kubernetes.io/serviceaccount/service-account.name": "calico-node",
+  "kubernetes.io/serviceaccount/service-account.uid": "26cd2edc-9942-43b6-93b3-06d292ecef0f",
+  "sub": "system:serviceaccount:kube-system:calico-node" // User
+}
+```
+
+### External OAuth
+
+That is the most interesting authorization schema! TLS and JWT are
+useful for components communication, but when you need to enable
+access for users, you usually want to apply your existing centralized
+user management system. In other words, you need to control user
+access with an external authentication provider.
+
+Kubernetes can be integrated with OAuth 2.0 -compatible providers.
+There are a plenty of such providers, including very popular like
+Microsoft Entra ID (previously Azure Active Directory), Okta, Auth0,
+other providers, and even plugins for LDAP.
+
+To integrate an external OAuth, you need to create the special config
+file and specify the path to it in the argument `--authentication-config`
+of `kube-apiserver` service. Using `AuthenticationConfiguration` policy,
+you can specify multiple OAuth authentication integrations, limit access
+by claims, and perform extra validation using [CEL expressions](https://github.com/google/cel-go).
+See [the official documentation](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuring-the-api-server)
+for details.
+
+The example of `AuthenticationConfiguration` with integration to
+Microsoft Entra ID (just closer to practice than the one in official
+documentation), restricted by tenant and Entra ID groups:
+
+```yaml
+apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://sts.windows.net/01234567-89ab-cdef-0123-456789abcdef/ # tenant uuid
+    discoveryURL: https://sts.windows.net/01234567-89ab-cdef-0123-456789abcdef/.well-known/openid-configuration # tenant uuid
+    certificateAuthority: |-
+      # trusted CA certificate to validate https://sts.windows.net
+      # endpoint, root or intermediate. You can take from output of
+      # `openssl s_client -connect sts.windows.net:443 -showcerts -crlf </dev/null`,
+      # should be the second one.
+    audiences:
+    - "https://management.core.windows.net/"
+    audienceMatchPolicy: MatchAny
+  claimValidationRules:
+  - expression: 'claims.exp - claims.nbf <= 86400'
+    message: "The token lifetime must not exceed 24 hours"
+  - expression: 'claims.tid == "01234567-89ab-cdef-0123-456789abcdef"' # tenant uuid
+    message: "Unknown tenant"
+  - expression: '"11111111-1111-1111-1111-111111111111" in claims.groups || "22222222-2222-2222-2222-222222222222" in claims.groups' # uuids of groups
+    message: "Not found in necessary groups"
+  - expression: 'claims.idtyp in ["app","user"]' # app for managed identity (optional)
+    message: "Wrong identity type"
+  claimMappings:
+    username:
+      expression: 'claims.idtyp == "app" ? "oidc:entra:app:" + claims.appid : "oidc:entra:user:" + claims.unique_name'
+    groups:
+      expression: 'dyn(claims.groups).map(x, "oidc:entra:" + string(x))'
+    uid:
+      expression: 'claims.idtyp == "app" ? claims.appid : claims.oid'
+    extra:
+    - key: 'acme.io/authtype'
+      valueExpression: '"oidc:entra"'
+  userValidationRules:
+  - expression: "!user.username.startsWith('system:')"
+    message: 'Username cannot use reserved "system:" prefix'
+  - expression: "user.groups.all(group, !group.startsWith('system:'))"
+    message: 'Groups cannot use reserved "system:" prefix'
+```
+
+This authentication schema requires configuration from both server
+(`kube-apiserver`) and client (`kubeconfig`) sides. For this particular
+example, in `kubeconfig`, you need to use `exec` plugin:
+
+```yaml
+apiVersion: v1
+kind: Config
+...
+users:
+- name: oauth-via-entra-id
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: az
+      args:
+      - account
+      - get-access-token
+      - --query
+      - '{"kind":''ExecCredential'',"apiVersion":''client.authentication.k8s.io/v1beta1'',"status":{"token":accessToken}}'
+      env: null
+      provideClusterInfo: false
+```
+
+### Webhooks (delegated)
+
+This is a rarely used authentication schema which allows delegating
+the authentication for separated service or different `kube-apiserver`
+deployment. It forwards the bearer token from the original request
+to the specified downward service with `TokenReview` call. You can
+find more details in [the official documentation](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#webhook-token-authentication).
+
+`kube-apiserver` can work only with JWT tokens, but you are not
+limited with it. You can implement your own service which similarly
+responds on `TokenReview` call and recognizes any format of tokens,
+even custom ones (like KMS-encrypted or HashiCorp Vault tokens).
+
+{/* TODO: ### Bootstrap Tokens */}
+
+## Debugging Authentication
+
+When you configure authentication systems, it's expected that you
+suffer from lack of transparency. The debugging authentication
+usually means identifying how the current configuration extracts
+`User` and `Groups` from the original request. And there are a few
+hints how to x-ray it:
+
+* The most useful command for debugging native JWT and/or external
+OAuth integration is using the direct request of `TokenReview` API.
+This method doesn't suit for TLS-based authentication, only for
+token based:
+
+```bash
+TOKEN="your.long.jwt"
+echo '{"spec":{"token":"'$TOKEN'"}}' | \
+  kubectl create --raw /apis/authentication.k8s.io/v1/tokenreviews -f - | \
+  jq .
+```
+
+Example of output for OAuth integration token:
+
+```json
+{
+  ...
+  "status": {
+    "authenticated": true,
+    "user": {
+      "username": "oidc:entra:user:user@example.dev",
+      "uid": "11111111-1111-1111-1111-111111111111",
+      "groups": [
+        "oidc:entra:55555555-0000-0000-0000-000000000001",
+        "oidc:entra:55555555-0000-0000-0000-000000000002",
+        "system:authenticated"
+      ],
+      "extra": {
+        "acme.io/authtype": [
+          "oidc:entra"
+        ]
+      }
+    },
+    "audiences": [
+      "https://kubernetes.default.svc.cluster.local"
+    ]
+  }
+}
+```
+
+Example with temporary JWT token assigned for calico pod:
+
+```json
+{
+  ...
+  "status": {
+    "authenticated": true,
+    "user": {
+      "username": "system:serviceaccount:kube-system:calico-node",
+      "uid": "349e27df-3543-4373-a494-aa4f7fc94ab0",
+      "groups": [
+        "system:serviceaccounts",
+        "system:serviceaccounts:kube-system",
+        "system:authenticated"
+      ],
+      "extra": {
+        "authentication.kubernetes.io/credential-id": [
+          "JTI=361f9f1f-8585-47d1-a97b-9c4b3e8000aa"
+        ],
+        "authentication.kubernetes.io/node-name": [
+          "control-plane-1"
+        ],
+        "authentication.kubernetes.io/node-uid": [
+          "3a6292da-9450-4f95-a301-484864ff586e"
+        ],
+        "authentication.kubernetes.io/pod-name": [
+          "calico-node-8xf2z"
+        ],
+        "authentication.kubernetes.io/pod-uid": [
+          "04af374f-6005-4947-8316-46ead9fc4467"
+        ]
+      }
+    },
+    "audiences": [
+      "https://kubernetes.default.svc.cluster.local"
+    ]
+  }
+}
+```
+
+* For ALL authentication methods, you can configure additional context
+in `kubeconfig` and use the following reporting:
+
+```bash
+kubectl create --raw /apis/authentication.k8s.io/v1/selfsubjectreviews -f - <<< '{}' | jq .
+```
+
+The response is quite the same, but only available if you have
+successfully authenticated.
+
+* You can also find the similar output of `Metadata` in the Kubernetes
+audit log, if configured (which is strongly recommended).
+
+## Quick Summary
+
+As you can see, it's not that complex system. The main principle is that
+it extracts `User` and `Groups` metadata in certain way and forwards it
+to authorization system - it's very recommended to continue reading about
+it here: [Authorization](/security/authorization).
